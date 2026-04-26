@@ -123,6 +123,67 @@ re-litigate or run more verification than needed.
 copy the current working file into `snapshots/`. Already-snapshotted
 versions live there as historical references.
 
+## Workstation environment (Windows host)
+
+The user's primary training machine is a Windows 11 desktop with the
+project at `C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`.
+
+- **Hardware**: AMD Ryzen 7 7800X3D (8C/16T, 96 MB L3 V-Cache,
+  AVX-512), 32 GB RAM, RTX 5060 Ti. The 96 MB L3 fits MuJoCo's per-env
+  physics working set, which is why this box outpaces the M1 Max for
+  SubprocVecEnv runs.
+- **Python**: `.venv/` with Python 3.11. Activate via
+  `.\.venv\Scripts\Activate.ps1`, or call `.\.venv\Scripts\python.exe`
+  directly. System `python` on PATH is a different interpreter and
+  lacks project deps — always use the venv.
+- **Shell**: Claude defaults to bash (Git for Windows / MSYS), not
+  PowerShell. Unix-style paths reach Windows drives via `/c/...`.
+- **GitHub**: `gh` CLI installed via winget at
+  `C:\Program Files\GitHub CLI\gh.exe`. HTTPS auth through gh; token
+  in the Windows keyring. New shells pick up `gh` on PATH;
+  mid-session shells need the full path. Repo is at
+  github.com/Eth4ck1e/hexapod-ai.
+
+## Training throughput on the workstation
+
+Pre-refactor benchmark (older single-file gait/IK, 16 envs via
+SubprocVecEnv, `device="cpu"`): **~5,000–5,250 SPS**. Same config
+with `device="cuda"` ran ~2,750 SPS — SB3 warns about this and it
+holds: GPU dispatch overhead dominates the small MLP gradient. Keep
+`device="cpu"` in `train.py`.
+
+The new `mj_jac` iterative IK in `gait/controller.py` is more
+expensive per step than the old closed-form math, so post-refactor
+throughput will be lower. Re-benchmark via `python benchmark_envs.py`
+when needed; the 200M-step curriculum's ~10–11 hr time estimate was
+based on the older numbers.
+
+`logs/` and `checkpoints/` on this box also contain pre-refactor runs
+(`hexapod_stage1`, `_test`, `_v3`, `_long`, plus `ant_vel_cmd`) that
+reference deleted code. All gitignored; safe to delete when
+convenient. The `hexapod_ros/` clone in the project root is similarly
+redundant now that meshes are vendored under `models/meshes/`.
+
+## Patterns developed in workstation sessions
+
+- **Smoke-test after env edits**: one-shot
+  `./.venv/Scripts/python.exe -c "..."` that resets and steps the env
+  before declaring a change done. Catches obvious wiring breaks.
+- **Filesystem-based run monitoring**: check `logs/<run>/` and
+  `checkpoints/<run>/` mtimes to confirm a run is alive without
+  poking the running process.
+- **TensorBoard event-file reading**: when the user asks "how's
+  training going?" parse the event file directly via
+  `tensorboard.backend.event_processing.event_accumulator.EventAccumulator`
+  rather than relying on a shareable dashboard. Pulls the same scalars
+  TB shows. Note that `rollout/ep_rew_mean` only updates when episodes
+  terminate; the new `EPISODE_MAX_STEPS=2000` truncation in `train.py`
+  keeps that signal fresh even after the policy stops falling.
+- **Training is launched manually by the user** in a separate
+  terminal. Claude's role is env / reward / training-script edits and
+  inspecting on-disk artifacts; don't try to launch long training
+  runs from the Bash tool.
+
 ## Memory / sync
 
 This file is the shared context. The local `.claude/memory/` directory
