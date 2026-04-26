@@ -1,6 +1,6 @@
 <mujoco model="phantomX">
 
-  <compiler angle="radian" meshdir="../hexapod_ros/hexapod_description/meshes/phantomX"/>
+  <compiler angle="radian" meshdir="./meshes/phantomx"/>
 
   <option timestep="0.005" gravity="0 0 -9.81" integrator="RK4"/>
 

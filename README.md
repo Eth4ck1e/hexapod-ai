@@ -65,9 +65,12 @@ This points at the vendored meshes in `models/meshes/phantomx/` so the project i
 
 ### Validate the scripted gait first
 ```bash
-python walk_test.py
+python walk_test.py        # Linux/Windows
+mjpython walk_test.py      # macOS — `launch_passive` requires mjpython
 ```
 A MuJoCo viewer opens; the robot should walk forward. Edit `cmd` near the top of the file to test other directions.
+
+> **macOS note:** Any script that opens the MuJoCo viewer (`walk_test.py`, `sandbox.py`, `gait_design.py`, `watch.py`, `watch_tiled.py`) must be launched with `mjpython` instead of `python`. `mjpython` ships with the `mujoco` pip package and is in `.venv/bin/`. Headless scripts (`train.py`, `benchmark_envs.py`) use plain `python`.
 
 ### Train
 ```bash
