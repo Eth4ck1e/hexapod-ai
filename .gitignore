@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Training artifacts
+checkpoints/
+logs/
+*.zip
+*.tfevents.*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/
+
+# Upstream clone — we vendor only the meshes we need.
+hexapod_ros/
+
+# Generated / one-off
+*.log
+*.err

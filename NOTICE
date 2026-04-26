@@ -1,0 +1,45 @@
+Third-party attributions
+========================
+
+This project includes assets and derivative code from the ROS Hexapod Stack
+by Kevin M. Ochs (https://github.com/KevinOchs/hexapod_ros), used under the
+terms of its 3-Clause BSD license:
+
+  - models/meshes/**/*.stl
+      Verbatim STL meshes from hexapod_ros/hexapod_description (PhantomX,
+      razbot variant, and bare/tarsus generic meshes).
+
+  - models/urdf/*.urdf, *.xacro
+      Verbatim URDF and xacro files from hexapod_ros/hexapod_description.
+
+  - envs/hexapod_env.py — _ik(), _tripod_gait()
+      Inverse-kinematics math and tripod gait pattern ported from
+      hexapod_ros/hexapod_controller (ik.cpp, gait.cpp).
+
+Original copyright notice:
+
+  ROS Hexapod Stack
+  Copyright (c) 2016, Kevin M. Ochs
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the Kevin Ochs nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL KEVIN OCHS BE LIABLE FOR ANY DIRECT,
+  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+  THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

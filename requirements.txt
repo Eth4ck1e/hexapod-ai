@@ -1,0 +1,10 @@
+mujoco==3.7.0
+gymnasium==1.2.3
+stable-baselines3==2.8.0
+numpy==2.4.3
+opencv-python==4.13.0.92
+tensorboard==2.20.0
+
+# PyTorch with CUDA 12.8 — install from PyTorch index when needed:
+#   pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+# CPU-only is fine for PPO MLP training; GPU helps only with vision policies.
