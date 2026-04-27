@@ -16,19 +16,13 @@ Stages:
 See project_gait_training_architecture.md for the full design rationale.
 """
 
-import atexit
 import os
-import subprocess
-import sys
-import time
-import webbrowser
 from collections import deque
-from functools import partial
 
 import numpy as np
 import gymnasium as gym
 from stable_baselines3 import PPO
-from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 
@@ -41,19 +35,8 @@ from envs.hexapod_env import HexapodEnv
 RUN_NAME    = "v2_curriculum"
 LOG_DIR     = f"logs/hexapod_{RUN_NAME}"
 CKPT_DIR    = f"checkpoints/hexapod_{RUN_NAME}"
-N_ENVS      = 32      # benchmarked sweet spot for the 7800X3D (8C/16T)
+N_ENVS      = 16
 TOTAL_STEPS = 200_000_000           # ~50M nominal per stage × 4
-
-# Live observability — both default ON.
-#   WATCH_LIVE: env-0 opens a MuJoCo viewer window so you can watch one bot
-#               train in real time. Costs some throughput because vec env
-#               steps synchronize across all workers (one slow worker = all
-#               slow). Worth it for sanity-checking; set False for max speed.
-#   AUTO_TB:    auto-launches `tensorboard --logdir LOG_DIR` as a subprocess
-#               and opens it in the default browser when training begins.
-WATCH_LIVE = True
-AUTO_TB    = True
-TB_PORT    = 6006
 
 # Episode max length (steps). With dt=0.005s, 2000 steps = 10s of sim time.
 # Episodes that hit this without falling are considered "successful walks."
@@ -204,37 +187,12 @@ class StageManagerCallback(BaseCallback):
 
 
 # ============================================================================
-# ENV FACTORY (per-index — env 0 optionally renders for live watching)
+# ENV FACTORY
 # ============================================================================
-def _make_env(idx, watch_live):
-    """Top-level factory so it pickles cleanly for SubprocVecEnv on Windows.
-    Env 0 gets `live_watch=True` (side-channel viewer; doesn't change
-    render_mode so SB3's VecEnv assertion stays happy)."""
-    kwargs = {"stage": 1, "live_watch": (idx == 0 and watch_live)}
-    env = HexapodEnv(**kwargs)
+def make_env():
+    env = HexapodEnv(stage=1)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=EPISODE_MAX_STEPS)
-    env = Monitor(env)
     return env
-
-
-# ============================================================================
-# TENSORBOARD AUTO-LAUNCH
-# ============================================================================
-def launch_tensorboard(logdir, port=6006, open_browser=True):
-    """Start TensorBoard as a child subprocess, register cleanup on exit,
-    and open it in the default browser. Returns the Popen handle."""
-    cmd = [sys.executable, "-m", "tensorboard.main",
-           "--logdir", logdir, "--port", str(port), "--bind_all"]
-    proc = subprocess.Popen(cmd,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-    atexit.register(lambda: proc.terminate())
-    print(f"[tensorboard] launched at http://localhost:{port}  (pid {proc.pid})")
-    if open_browser:
-        # Brief wait so the server is bound before the browser hits it.
-        time.sleep(2.5)
-        webbrowser.open(f"http://localhost:{port}")
-    return proc
 
 
 # ============================================================================
@@ -244,13 +202,7 @@ if __name__ == "__main__":
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(CKPT_DIR, exist_ok=True)
 
-    if AUTO_TB:
-        launch_tensorboard(LOG_DIR, port=TB_PORT)
-
-    env_fns = [partial(_make_env, i, WATCH_LIVE) for i in range(N_ENVS)]
-    vec_env = SubprocVecEnv(env_fns)
-    if WATCH_LIVE:
-        print(f"[viewer] env 0 will open a MuJoCo viewer window when training starts.")
+    vec_env = make_vec_env(make_env, n_envs=N_ENVS, vec_env_cls=SubprocVecEnv)
 
     model = PPO(
         "MlpPolicy",

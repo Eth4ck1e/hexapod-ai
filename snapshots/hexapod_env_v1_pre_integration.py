@@ -11,12 +11,11 @@ Cmd vector (matches gait.Controller — physical units):
   [1] vy           m/s     body lateral velocity (left = +)
   [2] wz           rad/s   body yaw rate (CCW = +)
   [3] pitch        rad     body pitch target (nose up = +)
-  [4] roll         rad     body roll target (left side up = + ; standard Euler;
-                                              matches what _body_pitch_roll computes)
+  [4] roll         rad     body roll target (right side up = +)
   [5] height_delta m       stance height delta (- = body raised)
-  [6] width_delta  m       stance width delta (+ = wider)
-  [7] shift_x      m       body shift in body +X    (RESERVED — task #8)
-  [8] shift_y      m       body shift in body +Y    (RESERVED — task #8)
+  [6] width_delta  m       stance width delta
+  [7] shift_x      m       body shift in body +X
+  [8] shift_y      m       body shift in body +Y
 
 Curriculum stages — controlled by `stage` arg at construction. Each stage
 unlocks a subset of cmd slots; locked slots are sampled as 0.
@@ -100,16 +99,10 @@ class HexapodEnv(gym.Env):
         8: (-0.030, 0.030),
     }
 
-    def __init__(self, render_mode=None, stage=1, live_watch=False):
+    def __init__(self, render_mode=None, stage=1):
         super().__init__()
         self.render_mode = render_mode
         self.stage       = stage
-        # Side-channel viewer trigger that doesn't go through gym's render_mode
-        # (SB3 VecEnv requires all envs to share the same render_mode, so we
-        # can't single out env 0 with render_mode="human"). When True, the
-        # env opens a passive MuJoCo viewer in its own process and syncs it
-        # every step. Independent of render_mode.
-        self.live_watch  = bool(live_watch)
 
         # Mujoco
         self._model = mujoco.MjModel.from_xml_path(MODEL_PATH)
@@ -156,9 +149,6 @@ class HexapodEnv(gym.Env):
         self._sim_time    = 0.0
         self._step_count  = 0
         self._last_action = np.zeros(self.ACTION_DIM, dtype=np.float32)
-        # Cached body-frame foot targets from the latest predict_with_feet()
-        # call — used by _get_obs() to avoid recomputing the whole gait pipeline.
-        self._latest_feet_body = np.zeros((6, 3), dtype=np.float32)
 
         # gait_scale is mutated externally by the GaitFadeCallback.
         self.gait_scale = 1.0
@@ -175,13 +165,8 @@ class HexapodEnv(gym.Env):
 
         self._data.qpos[2]    = 0.18           # spawn just above the ground
         self._data.qpos[3]    = 1.0            # quat w (upright)
-        # Use the controller's widened gait-time neutral, NOT the hardcoded
-        # NEUTRAL_POSE (which corresponds to the un-widened calibrated rest).
-        # Avoids a transient on the first step when the gait pulls the legs to
-        # the widened stance.
-        gait_neutral = self._ctrl.gait_neutral_pose.astype(np.float32)
-        self._data.qpos[7:25] = gait_neutral
-        self._data.ctrl[:]    = gait_neutral
+        self._data.qpos[7:25] = NEUTRAL_POSE
+        self._data.ctrl[:]    = NEUTRAL_POSE
         mujoco.mj_forward(self._model, self._data)
 
         self._cmd         = self._sample_cmd().astype(np.float32)
@@ -189,33 +174,23 @@ class HexapodEnv(gym.Env):
         self._step_count  = 0
         self._last_action = np.zeros(self.ACTION_DIM, dtype=np.float32)
 
-        # Prime the feet_body cache so the first _get_obs() returns a meaningful
-        # scaffold_hint (otherwise it would be the zero-init scratch buffer).
-        self._latest_feet_body = self._ctrl.compute_foot_targets(
-            self._cmd, self._sim_time).astype(np.float32)
-
         return self._get_obs(), {}
 
     def step(self, action):
         action = np.asarray(action, dtype=np.float32)
 
-        # 1. Scaffold joint targets + body-frame foot positions in one pass.
-        # Cache feet_body so _get_obs() doesn't re-run the gait pipeline.
-        scaffold_joints, feet_body = self._ctrl.predict_with_feet(self._cmd, self._sim_time)
-        scaffold_joints = scaffold_joints.astype(np.float32)
-        self._latest_feet_body = feet_body.astype(np.float32)
+        # 1. Scaffold joint targets from the analytical controller.
+        scaffold_joints = self._ctrl.predict(self._cmd, self._sim_time).astype(np.float32)
 
         # 2. Mix scaffold + residual. As gait_scale → 0 the scaffold relaxes
-        # to the controller's gait neutral (widened stance), while residual
-        # range grows.
+        # to NEUTRAL_POSE while residual range grows.
         residual_scale = (
             self.RESIDUAL_SCALE_MIN
             + (1.0 - self.gait_scale)
               * (self.RESIDUAL_SCALE_MAX - self.RESIDUAL_SCALE_MIN)
         )
-        gait_neutral = self._ctrl.gait_neutral_pose
-        target = (gait_neutral
-                  + (scaffold_joints - gait_neutral) * self.gait_scale
+        target = (NEUTRAL_POSE
+                  + (scaffold_joints - NEUTRAL_POSE) * self.gait_scale
                   + action * residual_scale)
         self._data.ctrl[:] = target
         mujoco.mj_step(self._model, self._data)
@@ -234,7 +209,7 @@ class HexapodEnv(gym.Env):
 
         self._last_action = action.copy()
 
-        if self.render_mode == "human" or self.live_watch:
+        if self.render_mode == "human":
             self._render_human()
 
         info = {**reward_info, "body_z": body_z, "tilt_sq": float(tilt_sq)}
@@ -384,9 +359,8 @@ class HexapodEnv(gym.Env):
         imu_accel = sd[self._acc_adr  : self._acc_adr  + 3]
 
         # Scaffold hint: where the analytical gait wants each foot, in body frame.
-        # Pulled from the cache populated in step() — same value compute_foot_targets
-        # would return for this (cmd, sim_time), without running the gait pipeline twice.
-        scaffold_hint = self._latest_feet_body.flatten()   # (6, 3) → (18,)
+        foot_targets = self._ctrl.compute_foot_targets(self._cmd, self._sim_time)
+        scaffold_hint = foot_targets.flatten()   # (6, 3) → (18,)
 
         phase = self._ctrl.get_phase(self._sim_time)
         body_linvel = np.asarray(self._body_frame_linvel(), dtype=np.float32)

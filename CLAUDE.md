@@ -15,31 +15,36 @@ scaffold fades out across a 4-stage curriculum so the final policy is
 fully autonomous and able to learn emergent behaviors (max-speed
 exploration, rolling tricks) beyond what the analytical gait can do.
 
-## Current state (as of 2026-04-26)
+## Current state
 
-Tasks #8–#13 complete. Training is running on the user's workstation.
-Tasks remaining:
-
-- #14: Stage 1 training run (in progress / monitoring)
-- #15: Test trained checkpoint via pilot.py + iterate
+Gait library uses **closed-form, vectorized IK** with full overlay
+support (stance width/height, body tilt, spin). All gait math validated
+sub-millimeter against MJCF FK. The `IK_gait.py` sandbox tested every
+overlay independently (smart test script with 19 phases covers them
+all). Training pipeline integrated and benchmarked at the workstation's
+sweet spot. Long-form curriculum training runs reasonable.
 
 ## Architecture (locked decisions)
 
 - **`gait/` package** is the single source of truth for gait math.
   `Controller` class: stateful, `predict(cmd, t) → 18 joint targets`.
-  Used by `simple_gait.py` (demo viewer), `pilot.py` (teleop),
-  `envs/hexapod_env.py` (training), eventually ESP32-S3 firmware.
+  Used by `simple_gait.py` (demo viewer), `IK_gait.py` (sandbox),
+  `pilot.py` (teleop), `envs/hexapod_env.py` (training), eventually
+  ESP32-S3 firmware.
 - **Cmd vector** (9 floats, physical units):
   ```
   [0] vx           m/s     body forward velocity
   [1] vy           m/s     body lateral velocity (left = +)
   [2] wz           rad/s   body yaw rate (CCW = +)
   [3] pitch        rad     body pitch target (nose up = +)
-  [4] roll         rad     body roll target (right side up = +)
+  [4] roll         rad     body roll target (LEFT side up = +; standard
+                                              Euler — matches what
+                                              env's _body_pitch_roll
+                                              computes from the quat)
   [5] height_delta m       stance height delta (- raises body)
-  [6] width_delta  m       stance width delta from neutral
-  [7] shift_x      m       body shift in body +X
-  [8] shift_y      m       body shift in body +Y
+  [6] width_delta  m       stance width delta from neutral (+ wider)
+  [7] shift_x      m       body shift in body +X       (RESERVED — task #8)
+  [8] shift_y      m       body shift in body +Y       (RESERVED — task #8)
   ```
 - **Reward (minimal)**: `tracking_exp(-||cmd-actual||²) + 0.1*survive
   - 0.01*action_delta² - 0.02*body_angvel² + (stage 4 only) novelty`.
@@ -57,54 +62,86 @@ Tasks remaining:
   - Stage 4: pure policy, novelty bonuses, body_linvel dropped from obs.
   - Adaptive advance: tracking ≥ 0.65 AND fall rate ≤ 0.30 AND min
     step count reached.
+- **Default stance widening**: `Controller.DEFAULT_STANCE_WIDTH = 0.015`
+  (+15 mm outward per foot). The widened rest gives a more vertical
+  foot-ground contact angle and generally walks better than the
+  calibrated rest. `Controller.gait_neutral_pose` exposes the joint
+  pose at this widened rest; env uses this for spawn settle (not the
+  hardcoded `NEUTRAL_POSE`, which corresponds to the un-widened rest
+  and is just the IK calibration anchor).
 - **Deployment plan**: analytical gait library ships to ESP32-S3 as a
   standalone "manual mode" AND as a safety fallback under the policy.
   Three runtime modes: manual / ai / assisted.
 
 ## Important non-obvious things
 
-- **`_ik` and `_tripod_gait` from the original `envs/hexapod_env.py`
-  were geometrically inconsistent with the MJCF.** They are deleted.
-  All gait math now lives in `gait/controller.py`, which uses
-  `mj_jac` iterative IK on the actual MJCF kinematics. Foot tip in
-  tibia local frame is determined empirically (lowest world-Z mesh
-  vertex at NEUTRAL_POSE).
+- **Gait IK is closed-form and vectorized** (was iterative `mj_jac`
+  during the first integration; replaced after benchmarking exposed
+  it as the dominant cost). Sub-mm round-trip accuracy validated
+  against MJCF FK across the full reachable workspace. See
+  `docs/kinematics.md` for the derivation. The closed-form path uses
+  per-leg formula→MJCF offsets calibrated once at boot to handle the
+  MJCF's non-trivial femur/tibia body quaternions and per-side axis
+  flips.
+- **Per-joint sign conventions** for the closed-form IK are
+  unintuitive: coxa always +1; femur +1 right / -1 left; tibia
+  -1 right / +1 left (femur and tibia are flipped between right and
+  left, and the formula's bend convention is opposite of MJCF tibia's
+  positive rotation, so right-side tibia gets -1 by itself even
+  before the side flip). Don't try to "simplify" by negating all
+  three for left legs — that breaks the math.
+- **Foot tip is empirical, not (0, 0, -TIBIA_LENGTH).** The PhantomX
+  tibia mesh has its tip at tibia-local `(0.134, 0.031, 0.0)`,
+  magnitude 0.138 m. `TIBIA_LENGTH = 0.138`, NOT 0.133. Using 0.133
+  in the IK formula breaks correctness off the rest pose. The +0.031
+  Y component is also baked into the offset table — this is why the
+  tibia formula→MJCF offset comes out to ≈ -1.346 rad (= 90° + 13°,
+  the angular offset from "tibia along straight extension" to "MJCF
+  tibia=0 link direction").
 - **Speed-magnitude variation is intentionally NOT in the curriculum.**
-  Translation cmd is always at full MAX_SPEED with random heading. The
-  current gait library models speed only via stride scaling, which is
-  wrong (real gait is mostly cadence/period modulation). When we
-  revisit speed, we'll rewrite the library to do period+scale together
-  (period ≈ >100% range, scale ≈ ~25% range). See
-  `.claude/memory/project_speed_control_plan.md`.
+  Translation cmd is always at full MAX_SPEED with random heading.
+  The current Controller models speed via stride scaling only, NOT
+  period modulation — period stays fixed at GAIT_PERIOD. The IK_gait
+  sandbox proved variable-period speed control works (factor in
+  [-1, +1] sweeps period and stride together for a wide envelope),
+  but the env's Controller deliberately uses the simpler stride-only
+  model for now to keep the policy's reward signal stable. Revisit
+  when we want a wider speed range.
 - **macOS viewer requires `mjpython`**, not plain `python`, for any
   script that calls `mujoco.viewer.launch_passive`. Affects
-  `simple_gait.py`, `demo.py`, `pilot.py`, `watch.py`, `watch_tiled.py`.
-  Headless (`train.py`) uses plain `python`.
+  `simple_gait.py`, `IK_gait.py`, `pilot.py`, `watch.py`,
+  `watch_tiled.py`. Headless (`train.py`) uses plain `python` — the
+  env-0 live-watch viewer works through SubprocVecEnv worker
+  subprocesses where MuJoCo's viewer binding is fine.
 - **`pilot.py` keyboard layout collides with mujoco viewer hotkeys.**
-  Accepted as fine for testing only. Long-term we'll add gamepad
-  support via pygame; gamepad axes don't conflict.
+  Accepted as fine for testing only. Long-term: gamepad support via
+  pygame; gamepad axes don't conflict.
 - **Legacy demo scripts are now broken**: `sandbox.py`, `gait_design.py`,
   `walk_test.py` import deleted constants from the old env. They've
-  been superseded by `simple_gait.py`, `demo.py`, `pilot.py`. Safe to
-  delete; left in repo for now as historical reference.
-- **Snapshots** in `snapshots/` are historical versions of
-  `simple_gait.py` from before the library refactor — useful as
-  reference for how each overlay was added incrementally.
+  been superseded by `simple_gait.py`, `IK_gait.py`, `pilot.py`. Safe
+  to delete; left in repo for now as historical reference.
+- **Snapshots** in `snapshots/` are historical versions of important
+  files captured before risky refactors (e.g., `*_v1_pre_integration.py`
+  are the pre-IK-refactor controller, env, and IK_gait state). Useful
+  for revert paths.
 
 ## Files at a glance
 
 | Path | Purpose |
 |------|---------|
-| `gait/controller.py` | Stateful gait Controller (the core math). |
-| `gait/__init__.py` | Public API exports. |
-| `simple_gait.py` | Demo viewer — toggle cycles for any cmd slot. |
-| `demo.py` | 28-phase auto showcase of every overlay. |
+| `gait/controller.py` | Stateful gait Controller. Closed-form vectorized IK. |
+| `gait/__init__.py` | Public API exports (Controller, link lengths, NEUTRAL_POSE, etc.). |
+| `simple_gait.py` | Demo viewer — toggle cycles for any cmd slot via Controller. |
+| `IK_gait.py` | Sandbox with all overlays + smart-test script (19-phase exercise). |
 | `pilot.py` | Keyboard teleop in mujoco viewer. |
 | `envs/hexapod_env.py` | Gym env wrapping `Controller` for PPO. |
-| `train.py` | Curriculum training entry point. |
+| `train.py` | Curriculum training entry point + auto-TB + live env-0 watcher. |
+| `bench_n_envs.py` | SubprocVecEnv N_ENVS sweep — finds CPU sweet spot. |
 | `watch.py` | Render trained checkpoint in viewer. |
+| `watch_tiled.py` | N-up grid render of trained checkpoint. |
 | `models/phantomx.xml` | MJCF model. Mesh path fixed to `./meshes/phantomx`. |
-| `snapshots/simple_gait_v*.py` | Historical pre-refactor versions. |
+| `docs/kinematics.md` | IK derivation, leg geometry, MJCF axis conventions. |
+| `snapshots/` | Historical versions before refactors (revert points). |
 
 ## Working-style preferences (apply to all conversations)
 
@@ -122,6 +159,13 @@ re-litigate or run more verification than needed.
 **Snapshot before risky refactors.** Before any large-scale rewrite,
 copy the current working file into `snapshots/`. Already-snapshotted
 versions live there as historical references.
+
+**No-redundant-IK rule for the env hot path.** `HexapodEnv.step` uses
+`Controller.predict_with_feet(cmd, t)` which returns BOTH joint targets
+AND body-frame foot positions in a single gait-pipeline pass, then
+caches `feet_body` for `_get_obs()` to read. Don't reintroduce
+separate `predict()` + `compute_foot_targets()` calls in the same
+step — that re-runs the whole gait pipeline twice for no gain.
 
 ## Workstation environment (Windows host)
 
@@ -146,17 +190,36 @@ project at `C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`.
 
 ## Training throughput on the workstation
 
-Pre-refactor benchmark (older single-file gait/IK, 16 envs via
-SubprocVecEnv, `device="cpu"`): **~5,000–5,250 SPS**. Same config
-with `device="cuda"` ran ~2,750 SPS — SB3 warns about this and it
-holds: GPU dispatch overhead dominates the small MLP gradient. Keep
-`device="cpu"` in `train.py`.
+Optimization history (single-env step rate, headless):
+- Pre-refactor (legacy single-file gait/IK):  ~5,000 SPS
+- Post-refactor with iterative `mj_jac` IK:     ~62 SPS  (massive regression)
+- Closed-form looped IK + vendored meshes:    ~5,200 SPS (recovered)
+- + `predict_with_feet` (no double pipeline): ~5,500 SPS
+- + Vectorized IK + frame transforms:         ~5,375 SPS  (gait math <60 µs/call)
 
-The new `mj_jac` iterative IK in `gait/controller.py` is more
-expensive per step than the old closed-form math, so post-refactor
-throughput will be lower. Re-benchmark via `python benchmark_envs.py`
-when needed; the 200M-step curriculum's ~10–11 hr time estimate was
-based on the older numbers.
+End-to-end env step is dominated by `mj_step` + reward construction,
+not gait math, so further gait optimization has diminishing returns.
+
+**`N_ENVS = 32` benchmarked as the sweet spot** for this CPU
+(8 physical cores × SMT 2 = 16 logical, but lighter per-step compute
+after the IK refactor leaves enough idle cycles to oversubscribe to
+24-32 envs profitably). Run `python bench_n_envs.py` to re-confirm
+if anything changes about the workload — sweeps 16/20/24/28/32 in
+~5 minutes.
+
+**`device="cpu"` for PPO**, always. SB3 warns about GPU for small MLP
+policies and the warning is correct: GPU dispatch overhead dominates
+the small gradient. We measured GPU at ~2,750 SPS vs CPU at ~5,000+
+SPS on this same machine.
+
+**Live observability** (in `train.py`):
+- `WATCH_LIVE = True` opens a MuJoCo viewer window in env 0's worker
+  subprocess. SubprocVecEnv synchronizes, so the viewer slowing env 0
+  drags all 32 workers' step rate down — flip `WATCH_LIVE = False`
+  for max throughput, on for spot-checking.
+- `AUTO_TB = True` launches `tensorboard --logdir LOG_DIR` as a child
+  process and opens the URL in the default browser. Killed via
+  `atexit` when training exits.
 
 `logs/` and `checkpoints/` on this box also contain pre-refactor runs
 (`hexapod_stage1`, `_test`, `_v3`, `_long`, plus `ant_vel_cmd`) that
@@ -177,12 +240,17 @@ redundant now that meshes are vendored under `models/meshes/`.
   `tensorboard.backend.event_processing.event_accumulator.EventAccumulator`
   rather than relying on a shareable dashboard. Pulls the same scalars
   TB shows. Note that `rollout/ep_rew_mean` only updates when episodes
-  terminate; the new `EPISODE_MAX_STEPS=2000` truncation in `train.py`
+  terminate; the `EPISODE_MAX_STEPS=2000` truncation in `train.py`
   keeps that signal fresh even after the policy stops falling.
 - **Training is launched manually by the user** in a separate
   terminal. Claude's role is env / reward / training-script edits and
   inspecting on-disk artifacts; don't try to launch long training
   runs from the Bash tool.
+- **Numerical-equivalence + round-trip validation** on every IK
+  refactor: random cmd → predict → mj_forward → measured foot.
+  Sub-mm error per leg means the refactor preserves correctness;
+  any larger error means a sign/offset bug that won't surface until
+  off-rest poses and is best caught early.
 
 ## Memory / sync
 
