@@ -84,14 +84,28 @@ import directly from `envs.hexapod_env` — no platform-detect needed.
   slots are zero, so any actual deviation creates real tracking error.
   This is what makes the bot learn smooth controlled locomotion vs
   jerky lurching that happens to track velocity.
-- **Curriculum** (in `train.py`):
-  - Stage 1: vx, vy at fixed MAX_SPEED (random heading only). 40M steps
-    nominal. `gait_scale = 1.0` throughout.
-  - Stage 2: + wz, height, width. 30M steps. `gait_scale 1.0 → 0.6`.
-  - Stage 3: + pitch, roll, shifts. 30M steps. `gait_scale 0.6 → 0.0`.
-  - Stage 4: pure policy, novelty bonuses, body_linvel dropped from obs.
-  - Adaptive advance: tracking ≥ 0.65 AND fall rate ≤ 0.30 AND min
-    step count reached.
+- **Curriculum / training modes** (in `train.py`):
+  Two supported modes — pick via `INITIAL_STAGE` and `SKIP_SCAFFOLD`
+  constants at the top of `train.py`:
+  - **BC-init refinement** (current default; `INITIAL_STAGE=3`,
+    `SKIP_SCAFFOLD=True`). Loads BC-pretrained policy via `--bc-init`,
+    runs single-stage at gait_scale=0.0 throughout (scaffold suppressed).
+    All cmd slots active from step 0 (translation, yaw, height, width,
+    pitch, roll). Recommended for refining a working walker. Pair with
+    `--log-std-init -3.0` for refinement noise calibration.
+  - **From-scratch curriculum** (`INITIAL_STAGE=1`, `SKIP_SCAFFOLD=False`).
+    Original 4-stage mode that progressively unlocks cmd slots and
+    fades the scaffold:
+    - Stage 1: vx, vy. `gait_scale=1.0` throughout.
+    - Stage 2: + wz, height, width. `gait_scale 1.0 → 0.6`.
+    - Stage 3: + pitch, roll. `gait_scale 0.6 → 0.0`.
+    - Stage 4: pure policy, novelty bonuses, body_linvel dropped from obs.
+    - Adaptive advance: tracking ≥ 0.65 AND fall rate ≤ 0.30 AND min
+      step count reached.
+    Per-stage step budgets (`STAGE_MIN_STEPS`) and `gait_scale`
+    envelope (`STAGE_GAIT_SCALE`) live in `train.py` and have been
+    iterated several times. Current values reflect "scaffold is good
+    enough that early fading is safe."
 - **Default stance widening**: `Controller.DEFAULT_STANCE_WIDTH = 0.015`
   (+15 mm outward per foot). The widened rest gives a more vertical
   foot-ground contact angle and generally walks better than the
@@ -128,16 +142,16 @@ import directly from `envs.hexapod_env` — no platform-detect needed.
   tibia formula→MJCF offset comes out to ≈ -1.346 rad (= 90° + 13°,
   the angular offset from "tibia along straight extension" to "MJCF
   tibia=0 link direction").
-- **Speed-magnitude variation status (Mac variant only as of 2026-04-26).**
-  Linux env keeps fixed-MAX_SPEED + random heading sampling. Mac env
-  uses **polar sampling with magnitude clamped to [40%, 85%] of
-  MAX_SPEED** — wide enough to teach speed control, narrow enough to
-  avoid the "stand still" failure mode (magnitude ≈ 0 episodes
-  encourage do-nothing policies) and the "ragged edge" failure mode
-  (magnitude = MAX_SPEED sits at scaffold capacity). The Controller
-  still models speed via stride-scaling only (no period modulation
-  yet); IK_gait sandbox has the period+stride proof-of-concept for
-  when we eventually want a wider envelope.
+- **Speed-magnitude variation: polar sampling, clamped magnitude.**
+  Translation cmd is sampled in polar (heading, magnitude) form: heading
+  uniform in [0, 2π), magnitude in `[SPEED_MIN_FRAC, SPEED_MAX_FRAC] ×
+  MAX_SPEED` (currently `[0.40, 0.85]`). The lower bound avoids the
+  "stand still" failure mode (magnitude ≈ 0 episodes encourage do-
+  nothing policies); the upper bound avoids the "ragged edge" mode
+  (magnitude = MAX_SPEED sits at scaffold capacity, looks ugly). The
+  Controller still models speed via stride-scaling only (no period
+  modulation yet); the `IK_gait.py` sandbox has the period+stride
+  proof-of-concept for when we eventually want a wider envelope.
 - **macOS viewer requires `mjpython`**, not plain `python`, for any
   script that calls `mujoco.viewer.launch_passive`. Affects
   `simple_gait.py`, `IK_gait.py`, `pilot.py`, `pilot_ai.py`, `watch.py`,
@@ -309,13 +323,15 @@ the small gradient. We measured GPU at ~2,750 SPS vs CPU at ~5,000+
 SPS on this same machine.
 
 **Live observability** (in `train.py`):
-- `WATCH_LIVE = True` opens a MuJoCo viewer window in env 0's worker
-  subprocess. SubprocVecEnv synchronizes, so the viewer slowing env 0
-  drags all 32 workers' step rate down — flip `WATCH_LIVE = False`
-  for max throughput, on for spot-checking.
+- `WATCH_LIVE = True` makes env 0 publish `qpos+qvel+sim_time` every
+  step to the `hexapod_live_state` shared-memory region. Run
+  `live_viewer.py` in a separate terminal (`python live_viewer.py` on
+  Linux/Windows; `mjpython live_viewer.py` on macOS) to render. Cost
+  is one numpy copy per env-0 step — negligible, no SubprocVecEnv
+  drag. Always-on safe.
 - `AUTO_TB = True` launches `tensorboard --logdir LOG_DIR` as a child
-  process and opens the URL in the default browser. Killed via
-  `atexit` when training exits.
+  process and (optionally, via `AUTO_OPEN_BROWSER`) opens the URL in
+  the default browser. Killed via `atexit` when training exits.
 
 `logs/` and `checkpoints/` on this box also contain pre-refactor runs
 (`hexapod_stage1`, `_test`, `_v3`, `_long`, plus `ant_vel_cmd`) that
@@ -348,15 +364,16 @@ redundant now that meshes are vendored under `models/meshes/`.
   any larger error means a sign/offset bug that won't surface until
   off-rest poses and is best caught early.
 
-## Training tuning levers (Mac variant — actively iterated)
+## Training tuning levers (actively iterated)
 
 Things we keep adjusting between training runs as the policy improves.
-All in `envs/hexapod_env_mac.py` and `train_mac.py`. The Linux versions
-don't have these knobs yet — backport whichever land as keepers.
+All in `envs/hexapod_env.py` and `train.py` — the unified cross-platform
+files. Mac and workstation use the same code, so changes here apply
+everywhere.
 
 ### Reward shaping
 
-- **Drift penalty** (`envs/hexapod_env_mac.py:YAW_DRIFT_W` /
+- **Drift penalty** (`envs/hexapod_env.py:YAW_DRIFT_W` /
   `PITCH_DRIFT_W` / `ROLL_DRIFT_W`, gated by `YAW_GATE` / `TILT_GATE`).
   *Linear* penalty on `|actual_wz|`/`|actual_pitch|`/`|actual_roll|`
   when the corresponding cmd is near zero. Sharper gradient near zero
@@ -387,35 +404,42 @@ don't have these knobs yet — backport whichever land as keepers.
 
 - **Stage masking is per-skill, not all-at-once.** Adding many cmd
   slots simultaneously in stage 1 (full overlays at once) produced
-  worse results than the original Linux per-stage progression. The
-  Mac variant currently uses `STAGE_CMD_MASK[1] = [1,1,0,0,0,0,0,0,0]`
-  — translation only — with drift penalty implicitly training "stay
-  straight + stay level + don't bounce." Add wz / height / width /
-  pitch / roll one (or a small group) per future stage. Don't go back
-  to all-at-once unless you have a plan for the "do nothing" trap.
-- **Schedule constants** in `train_mac.py`: `STAGE_MIN_STEPS[1]`
-  controls fade-progress denominator; `STAGE_FADE_RANGE` controls when
-  within the stage the fade happens. Recent successful pattern:
-  8M scaffold-strong / 4M fade / 13M autonomous = 25M total.
-- **Per-stage `gait_scale` envelope**: stage 1 = (1.0, 0.0) for the
-  Mac short runs (fully fade within the single-stage run); the
-  original Linux multi-stage curriculum uses (1.0, 1.0) → (1.0, 0.6)
-  → (0.6, 0.0) → (0.0, 0.0).
+  worse results than the per-stage progression. Current
+  `STAGE_CMD_MASK[1] = [1,1,0,0,0,0,0,0,0]` — translation only — with
+  drift penalty implicitly training "stay straight + stay level +
+  don't bounce." Add wz / height / width / pitch / roll one (or a
+  small group) per future stage. Don't go back to all-at-once unless
+  you have a plan for the "do nothing" trap.
+- **Schedule constants** in `train.py`: `STAGE_MIN_STEPS[i]` controls
+  per-stage fade-progress denominator; `STAGE_FADE_RANGE` controls
+  when within the stage the fade happens. Recent successful pattern
+  for short single-stage runs: 8M scaffold-strong / 4M fade / 13M
+  autonomous = 25M total.
+- **Per-stage `gait_scale` envelope**: short single-stage refinement
+  runs use `STAGE_GAIT_SCALE[1] = (1.0, 0.0)` (full fade within the
+  single stage); the original multi-stage curriculum uses
+  `(1.0, 1.0) → (1.0, 0.6) → (0.6, 0.0) → (0.0, 0.0)` across stages
+  1-4. Pick whichever matches your run's `INITIAL_STAGE` /
+  `SKIP_SCAFFOLD` configuration.
 
 ### Auto-stop and resume
 
-- **`EARLY_STOP_*`** in `train_mac.py` — only active in autonomous
-  phase (gait_scale == 0.0). Halts training when rolling tracking
-  reward plateaus (no improvement > 0.005 over 3M steps, after a 3M
-  warmup, with min reward 0.5). Saves wall time when the policy has
-  converged before TOTAL_STEPS.
-- **`python train_mac.py --resume`** — load latest checkpoint from
+- **`EARLY_STOP_*`** in `train.py` — only active in autonomous phase
+  (gait_scale == 0.0). Halts training when rolling tracking reward
+  plateaus (no improvement > 0.005 over 3M steps, after a 3M warmup,
+  with min reward 0.5). Saves wall time when the policy has converged
+  before TOTAL_STEPS.
+- **`python train.py --resume`** — load latest checkpoint from
   `CKPT_DIR` and continue training. Resume mode forces gait_scale=0.0
   throughout (no scaffold replay) and gives a fresh early-stop warmup
   window. Use this for quick fine-tunes after small reward / sampling
   changes — much faster than re-running from scratch. Pass an explicit
   path with `--resume <path-without-.zip>` to fine-tune from a
   specific older checkpoint.
+- **`python train.py --bc-init <path>`** — initialize from a BC-
+  pretrained policy. Resets `log_std` to a safer default (-2.0); for
+  refinement runs override with `--log-std-init -3.0` (see Phase 2
+  noise calibration below).
 
 ## Lessons learned about RL training (collected over Mac iteration)
 
@@ -472,7 +496,7 @@ method for its specific goal; advance only when the current axis is
 |---|---|---|---|
 | 0 | BC pretraining (`pretrain_bc.py`) | Bootstrap a working walker via supervised learning on scaffold demos | DONE — BC v2 |
 | 1 | DAgger (script not yet built) | Refine BC into a flawless mimic — close covariate-shift gap | DEFERRED |
-| 2 | Small-noise PPO (`train_mac.py --bc-init … --log-std-init -3.0`) | Refine reward-coded axes (foot dev, sliding) past scaffold quality | CURRENT |
+| 2 | Small-noise PPO (`train.py --bc-init … --log-std-init -3.0`) | Refine reward-coded axes (foot dev, sliding) past scaffold quality | CURRENT |
 | 3 | Domain randomization (env modifications + RL or DAgger) | Sim-to-real robustness | not started |
 | 4 | Distillation (script TBD) | Compress to small net for ESP32-S3 | not started |
 
