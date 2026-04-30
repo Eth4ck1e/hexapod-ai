@@ -529,7 +529,9 @@ No noise, no exploration, no PPO — pure supervised learning on the
 policy's own state distribution. Best tool for "make BC v2 a flawless
 mimic." Cannot exceed scaffold quality (DAgger's ceiling).
 
-## MJX exploration findings (2026-04-29)
+## MJX exploration findings
+
+### Mac investigation (2026-04-29)
 
 User benchmarked Brax PPO on Ant to evaluate JAX-Metal speedup before
 committing to a hexapod MJX port.
@@ -538,24 +540,144 @@ committing to a hexapod MJX port.
 (latest, last release Oct 2024) doesn't implement the Cholesky
 decomposition op (`mhlo.cholesky`). MJX's smooth-dynamics solver calls
 `jax.scipy.linalg.cho_factor` on the mass matrix every step, so MJX
-cannot run on Apple Silicon GPU at all today. No newer/beta jax-metal
-on PyPI. Apple's release cadence is ~18 months stale.
+cannot run on Apple Silicon GPU at all today.
 
 **CPU MJX on M3 Max:** ~9,000 steps/sec with 2048 vmap'd envs (Brax
-PPO on Ant). Compared to current SubprocVecEnv ~5,000 steps/sec, that's
-only ~1.8× speedup. Not worth the multi-day porting effort for that
-margin.
+PPO on Ant). Compared to SubprocVecEnv ~5,000 steps/sec, that's only
+~1.8× speedup. Not worth porting on Mac alone.
 
-**Real MJX upside lives on CUDA.** The 5060 Ti workstation should hit
-~100,000–500,000 steps/sec (50–100× current Mac throughput). When
-training moves to the workstation, the MJX port becomes worth doing.
-A test environment lives at `~/.venv-mjx-test/` and a benchmark script
-at `~/mjx_ant_bench.py` — both are reusable on the workstation by
-swapping `jax-metal` for `jax[cuda12]` and re-running with
-`JAX_PLATFORMS=cuda`.
+### Workstation investigation (2026-04-30)
 
-**Decision logged:** stay on SubprocVecEnv on Mac. Plan MJX port for
-when training moves to workstation.
+Set up Ubuntu 24.04 inside WSL2 on the Windows workstation, installed
+`jax[cuda12] mujoco mujoco-mjx brax` in `~/.venv-mjx/`. WSL exposes
+the host's NVIDIA driver via `/dev/dxg`; JAX detects the 5060 Ti as
+`CudaDevice(id=0)`. Same Brax Ant benchmark (4096 vmap'd envs):
+
+| Backend | Total throughput | Speedup vs SubprocVecEnv |
+|---|---|---|
+| SubprocVecEnv (current hexapod, N_ENVS=32) | ~5,400 SPS | 1.0× (baseline) |
+| **CPU MJX** (Ryzen 7800X3D)                | **18,016 SPS** | 3.3× |
+| **CUDA MJX** (RTX 5060 Ti via WSL2)        | **377,521 SPS** | **~70×** |
+
+Confirms the original prediction (100k–500k SPS expected). The 7800X3D's
+L3 + AVX-512 also doubles CPU MJX over the M3 Max — so even the CPU
+fallback is ~3× SubprocVecEnv on this box.
+
+**Decision: port the hexapod stack to MJX.** The 60× wall-clock speedup
+is large enough to fundamentally change the iteration cycle (5-hour
+training runs become ~5–10 minutes, enabling rapid reward / curriculum
+experimentation). Plan in next section.
+
+WSL benchmark script lives at `~/mjx_bench/ant_bench.py` (inside WSL,
+not in the project tree); reusable for re-benchmarking after the port.
+
+## MJX port plan (2026-04-30)
+
+Goal: replace the SubprocVecEnv training stack with a JAX-native one
+that runs on the 5060 Ti via WSL2. Target throughput: 150k–300k SPS for
+the hexapod (slightly slower than Brax Ant's 378k due to 18 DOF + more
+contacts vs Ant's 8 DOF). All current capability — closed-form IK,
+overlays, BC infrastructure, curriculum — to be preserved.
+
+### Phase 1 — Simplified MJCF (`models/phantomx_simple.xml`)
+
+Replace mesh geoms with primitive geoms. **The meshes were never load-
+bearing for physics** — they only provided collision shapes that we
+can specify more cheaply with primitives, and visual appearance which
+training doesn't care about. MJX strongly prefers primitives (mesh
+collision is hard to JIT efficiently and limits parallelism).
+
+Replacements:
+- **Body**: box geom, dimensions matching the chassis bounding-box
+  (~0.27 × 0.23 × 0.04 m). Mass + inertia stays as currently specified.
+- **Coxa, femur**: capsule geoms along the link's length axis.
+- **Tibia**: capsule geom + small sphere at the foot tip.
+- **Joint axes, ranges, kp/kv, masses, inertias**: all unchanged.
+- Visual meshes can stay as `contype=0 conaffinity=0` non-collision
+  geoms (purely decorative) OR be removed entirely.
+
+The closed-form IK only uses link lengths and the foot-tip position;
+both are now explicit constants in the new model rather than empirical
+values derived from mesh vertices. `FOOT_TIP_LOCAL` becomes
+`(0, 0, -tibia_length)` exactly — cleaner than the current empirical
+`(0.134, 0.031, 0.0)` from mesh vertex search.
+
+Validation: run `IK_gait.py` against the new model — sub-mm round-trip
+error should hold. The user's insight here is correct: physics cares
+about geometry constraints (collision shapes, joint limits, masses),
+not visual fidelity. The "meat on the wireframe" framing is the right
+mental model.
+
+### Phase 2 — Pure-JAX gait controller (`gait/controller_jax.py`)
+
+Port `gait/controller.py` to JAX. Most of it translates near-1:1 since
+the IK is already vectorized over `(6, *)` arrays:
+
+- `numpy` → `jax.numpy`; `math.atan2` → `jnp.arctan2`; etc.
+- Pre-compute all per-leg constants (yaw cos/sin, body origin in coxa
+  frame, joint signs, leg path table) at controller construction; pass
+  as `static_argnums` or fold into closure for `@jax.jit`.
+- Replace `if/else` on cmd values with `jnp.where` or `jax.lax.cond`.
+- The path-lookup `LEG_PATH_DELTAS[arange(6), n_idx]` advanced indexing
+  is JAX-compatible; same logic ports directly.
+- `set_cmd` / stateful `step(dt)` API replaced by purely functional
+  `predict_with_feet(cmd, t)` (already exists; just needs JIT).
+
+Validation: random cmd → both controllers → `max(abs(jax_out -
+np_out)) < 1e-6`. Run on 1000 random cmds.
+
+### Phase 3 — JAX-native env (`envs/hexapod_env_jax.py`)
+
+Brax-style functional environment:
+
+```python
+state = env.reset(key)                  # PRNGKey → State (NamedTuple)
+state = env.step(state, action)         # functional update
+```
+
+State carries qpos/qvel/sim_time/cmd/last_action/etc. as `jnp.ndarray`
+fields. Reward and termination computed in pure JAX. Compatible with
+Brax's PPO trainer out of the box.
+
+The `live_watch` SHM observability path doesn't apply to MJX (training
+runs entirely on GPU; there's no per-worker subprocess to publish
+from). Live-watching during training will work differently: a separate
+host process samples N_envs[0]'s qpos at, say, 30 Hz from device memory
+via `state.qpos.block_until_ready()` + `np.asarray(...)`. Or just use
+periodic checkpoint dumps + `watch.py` like before.
+
+### Phase 4 — Training pipeline (`train_jax.py`)
+
+Use Brax's PPO trainer (`brax.training.agents.ppo`). It's JAX-native,
+runs entirely on the GPU, takes a Brax-style env. Curriculum
+(`StageManagerCallback`-equivalent) needs porting to a JAX-friendly
+training-step hook. BC pretraining (`pretrain_bc.py`) needs adapting
+to produce Brax-compatible policy weights — this is the gnarliest
+piece, may delay until after we validate the basic training loop works.
+
+### Phase 5 — Validation
+
+- Benchmark hexapod stepping on CUDA: target ≥150k SPS at N_envs=4096.
+- Short training run (1-2M steps) on JAX, compare reward curve to a
+  matched SubprocVecEnv run. Reward signals should be statistically
+  equivalent (within stochastic noise).
+- If CUDA throughput is good but training behavior diverges from
+  SubprocVecEnv significantly, suspect numerical-precision drift from
+  fp32 (vs SubprocVecEnv's fp64 by default in MuJoCo).
+
+### Effort estimate
+
+Phase 1 + 2: half a day each (clean ports of well-tested code).
+Phase 3 + 4: 1-2 days each (more design surface, integration with
+Brax's training APIs, BC re-targeting).
+Phase 5: ongoing.
+
+**Sequencing decision**: if the user wants to validate the model
+simplification + JAX IK fast before committing to the env/training port,
+phases 1-2 alone produce a useful intermediate state — the simplified
+MJCF + JAX gait controller could be benchmarked against the existing
+MJCF + SubprocVecEnv to confirm "the simple model walks the same."
+That's a low-risk go/no-go gate before phase 3.
 
 ## Memory / sync
 
