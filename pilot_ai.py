@@ -37,13 +37,7 @@ import mujoco
 import mujoco.viewer
 from stable_baselines3 import PPO
 
-# Use the Mac variant on macOS (has drift penalty + variable speed sampling),
-# the original env on Linux. Either way, both expose the same HexapodEnv class
-# with the same observation space, so the loaded policy is compatible.
-if sys.platform == "darwin":
-    from envs.hexapod_env_mac import HexapodEnv
-else:
-    from envs.hexapod_env import HexapodEnv
+from envs.hexapod_env import HexapodEnv
 
 from gait import NEUTRAL_POSE
 

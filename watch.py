@@ -24,15 +24,7 @@ import time
 
 from stable_baselines3 import PPO
 
-# Use the Mac env on macOS (matches the training env so the policy sees the
-# same obs distribution it was trained on), Linux env elsewhere. The two envs
-# have the same observation_space dim, so PPO.load() can't catch a mismatch —
-# loading a Mac-trained policy with the Linux env silently produces cursed,
-# out-of-distribution behavior at gait_scale=0.0.
-if sys.platform == "darwin":
-    from envs.hexapod_env_mac import HexapodEnv
-else:
-    from envs.hexapod_env import HexapodEnv
+from envs.hexapod_env import HexapodEnv
 
 
 def latest_run_dir(root="checkpoints"):

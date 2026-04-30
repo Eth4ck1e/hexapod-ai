@@ -28,17 +28,7 @@ import time
 import numpy as np
 from stable_baselines3 import PPO
 
-# Use the Mac env on macOS (matches the training env so the policy sees the
-# same obs distribution it was trained on), Linux env elsewhere.
-# CRITICAL: this MUST match the env used during training. The two envs have
-# the same observation_space dim (78) so PPO.load() doesn't complain about
-# mismatch, but the obs *values* differ in subtle ways (scaffold_hint
-# caching, reward shaping, sample_cmd ranges). Loading a Mac-trained policy
-# into the Linux env produces "cursed" out-of-distribution behavior.
-if sys.platform == "darwin":
-    from envs.hexapod_env_mac import HexapodEnv
-else:
-    from envs.hexapod_env import HexapodEnv
+from envs.hexapod_env import HexapodEnv
 
 
 # ============================================================================

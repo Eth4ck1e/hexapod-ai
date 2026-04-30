@@ -34,27 +34,25 @@ worse than BC v2 because PPO's stochastic noise destabilizes the
 working walker faster than it can find improvements. See "Methodology
 learnings" below for the noise-vs-refinement tradeoff.
 
-**Per-platform split (added 2026-04-26).** macOS can't open the MuJoCo
-viewer inside a SubprocVecEnv worker (Cocoa main-loop requirement;
-workers run as plain `python`, not `mjpython`). So we forked the env
-and trainer:
+**Unified cross-platform stack (2026-04-29 — was a Mac/Linux split).**
+Single `envs/hexapod_env.py` and `train.py` work on both platforms. The
+viewer-mechanism difference that originally forced the split (macOS's
+Cocoa viewer can only run under mjpython, but SubprocVecEnv workers
+run plain `python`) is resolved by routing live-watch through shared
+memory on both platforms: env-0 publishes qpos+qvel+sim_time to the
+`hexapod_live_state` SHM region every step, and a separate viewer
+process reads it. On macOS run that viewer with `mjpython
+live_viewer.py`; on Linux just `python live_viewer.py`.
 
-- `envs/hexapod_env.py` + `train.py` — Linux/workstation originals.
-  In-worker viewer for `WATCH_LIVE=True` works fine here.
-- `envs/hexapod_env_mac.py` + `train_mac.py` — Mac variants. No
-  in-worker viewer. Instead, env-0 publishes its qpos+qvel+sim_time to
-  a 400-byte shared-memory region (`hexapod_live_state`) every step,
-  and a separate `mjpython live_viewer.py` process reads it and
-  renders. The Mac variant also carries fine-tuning improvements that
-  haven't been backported to the Linux version yet — drift penalty,
-  polar-sampled translation, tightened speed range, all-overlays mask
-  experiments. Merge to Linux once they're proven valuable.
+The previous Mac variant carried all the recent improvements (drift
+penalty, polar-sampled translation, contact shaping, foot deviation,
+no_progress termination, BC infrastructure, pitch sign fix, etc.).
+The unified version is that codebase — the older Linux env/train were
+deleted as obsolete. Snapshots in `snapshots/*_pre_unify.py` preserve
+the pre-unification state.
 
-All other scripts (`gait/`, `simple_gait.py`, `IK_gait.py`, `pilot.py`,
-`watch.py`, `watch_demo.py`, `pilot_ai.py`, etc.) are cross-platform.
-Tools that import the env auto-pick the right module by `sys.platform`
-where it matters; the gym observation space is identical between the
-two envs.
+All scripts (`watch.py`, `watch_demo.py`, `pilot_ai.py`, `pretrain_bc.py`)
+import directly from `envs.hexapod_env` — no platform-detect needed.
 
 ## Architecture (locked decisions)
 
@@ -143,19 +141,16 @@ two envs.
 - **macOS viewer requires `mjpython`**, not plain `python`, for any
   script that calls `mujoco.viewer.launch_passive`. Affects
   `simple_gait.py`, `IK_gait.py`, `pilot.py`, `pilot_ai.py`, `watch.py`,
-  `watch_demo.py`, `watch_tiled.py`, `live_viewer.py`. Headless (`train.py`,
-  `train_mac.py`, `bench_n_envs.py`) use plain `python`.
-- **`WATCH_LIVE=True` works differently per platform.** Linux: env-0
-  worker calls `launch_passive` directly inside the SubprocVecEnv
-  subprocess (works because Linux has no Cocoa main-loop restriction).
-  Mac: env-0 worker writes state to `hexapod_live_state` shared memory
-  every step; user runs `mjpython live_viewer.py` in a separate
-  terminal to render that state. The viewer process IS mjpython, the
-  worker is plain python — no Cocoa conflict. **Don't try to launch
-  train_mac.py with mjpython expecting workers to inherit it; they
-  don't, because mjpython is a shell wrapper that invokes the
-  underlying python interpreter, and `sys.executable` in the workers
-  points at python.**
+  `watch_demo.py`, `watch_tiled.py`, `live_viewer.py`. Headless scripts
+  (`train.py`, `pretrain_bc.py`, `bench_n_envs.py`) use plain `python`.
+  Linux has no such restriction — every script just uses `python`.
+- **`WATCH_LIVE=True`** publishes env-0's qpos+qvel+sim_time to the
+  `hexapod_live_state` shared-memory region every step. Run
+  `live_viewer.py` (mjpython on macOS, python on Linux) in a separate
+  terminal to render. **Don't try to launch `train.py` itself with
+  mjpython expecting the workers to inherit it — they don't, because
+  mjpython is a shell wrapper around the underlying python interpreter,
+  and `sys.executable` in the SubprocVecEnv workers points at python.**
 - **`pilot.py` keyboard layout collides with mujoco viewer hotkeys.**
   Accepted as fine for testing only. Long-term: gamepad support via
   pygame; gamepad axes don't conflict.
@@ -195,12 +190,10 @@ two envs.
 | `IK_gait.py` | Sandbox with all overlays + smart-test script (19-phase exercise). | both |
 | `pilot.py` | Keyboard teleop driving the analytical scaffold directly. | both |
 | `pilot_ai.py` | Keyboard teleop driving a trained PPO checkpoint. Hold Shift = run mode (2× speed). | both |
-| `envs/hexapod_env.py` | Linux gym env. In-worker viewer for `WATCH_LIVE=True`. | Linux |
-| `envs/hexapod_env_mac.py` | Mac gym env. Shared-memory state mirror; drift penalty; tightened speed sampling. | Mac |
-| `train.py` | Linux training. In-worker viewer. Stage-1 = vx,vy at fixed MAX_SPEED. | Linux |
-| `train_mac.py` | Mac training. SHM state mirror. `--resume`, `--bc-init`, `--log-std-init` flags. Supports `INITIAL_STAGE` and `SKIP_SCAFFOLD` config knobs. | Mac |
-| `pretrain_bc.py` | Supervised behavioral cloning of scaffold demonstrations. Produces a PPO-compatible policy that mimics the scaffold's joint targets. `--stage`, `--steps`, `--epochs`, `--out` flags. | Mac (extensible) |
-| `live_viewer.py` | Reads `hexapod_live_state` shm and renders — pair with `train_mac.py`. | Mac |
+| `envs/hexapod_env.py` | Cross-platform gym env. SHM-based live-state mirror, drift penalty, contact shaping, foot deviation, no_progress termination, BC `info["bc_target"]` exposure. | both |
+| `train.py` | Cross-platform PPO training. Flags: `--resume`, `--bc-init`, `--log-std-init`. Config knobs: `INITIAL_STAGE`, `SKIP_SCAFFOLD`, `WATCH_LIVE`. | both |
+| `pretrain_bc.py` | Supervised behavioral cloning of scaffold demonstrations. Produces a PPO-compatible policy that mimics the scaffold's joint targets. `--stage`, `--steps`, `--epochs`, `--out` flags. | both |
+| `live_viewer.py` | Reads `hexapod_live_state` shm and renders — pair with `train.py`. macOS needs `mjpython`; Linux uses plain `python`. | both |
 | `bench_n_envs.py` | SubprocVecEnv N_ENVS sweep — finds CPU sweet spot. | both |
 | `watch.py` | Render trained checkpoint with random env-sampled cmds. Settles to neutral first. | both |
 | `watch_demo.py` | Render trained checkpoint through a 23-phase preset cmd script. Settles first. | both |

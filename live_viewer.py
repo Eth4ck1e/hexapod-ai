@@ -3,11 +3,13 @@ live_viewer.py — real-time mirror of env-0 from a running training session.
 
 Connects to the shared-memory region that env-0 writes its qpos+qvel to every
 step, and renders that state in a MuJoCo viewer at ~60 FPS. Decouples the
-viewer process from the SubprocVecEnv worker, so this works on macOS where
-the Cocoa viewer can only run under mjpython but the worker can't be mjpython.
+viewer process from the SubprocVecEnv worker so the same code path works
+on both platforms (macOS's Cocoa viewer can only run under mjpython but
+SubprocVecEnv workers can't be mjpython; SHM mediation sidesteps that).
 
-Usage (macOS — mjpython required for the viewer):
-    mjpython live_viewer.py
+Usage:
+    macOS:  mjpython live_viewer.py
+    Linux:  python   live_viewer.py
 
 Workflow:
     1. Make sure train.py has WATCH_LIVE = True at the top.

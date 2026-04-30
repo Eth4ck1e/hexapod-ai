@@ -42,7 +42,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from envs.hexapod_env_mac import HexapodEnv
+from envs.hexapod_env import HexapodEnv
 
 
 def _make_env(idx, stage):
