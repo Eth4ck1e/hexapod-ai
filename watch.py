@@ -24,7 +24,15 @@ import time
 
 from stable_baselines3 import PPO
 
-from envs.hexapod_env import HexapodEnv
+# Use the Mac env on macOS (matches the training env so the policy sees the
+# same obs distribution it was trained on), Linux env elsewhere. The two envs
+# have the same observation_space dim, so PPO.load() can't catch a mismatch —
+# loading a Mac-trained policy with the Linux env silently produces cursed,
+# out-of-distribution behavior at gait_scale=0.0.
+if sys.platform == "darwin":
+    from envs.hexapod_env_mac import HexapodEnv
+else:
+    from envs.hexapod_env import HexapodEnv
 
 
 def latest_run_dir(root="checkpoints"):
@@ -102,6 +110,16 @@ def main():
     print()
 
     obs, _ = env.reset()
+    # Settle to a stable standing pose before starting evaluation. CRITICAL:
+    # use the smallest in-distribution cmd (NOT zero) — Mac env never trained
+    # on cmd=0 so feeding zeros here produces OOD garbage joint residuals.
+    import numpy as _np
+    settle_speed = (getattr(env, "SPEED_MIN_FRAC", 0.4) + 0.05) * env._ctrl.MAX_SPEED
+    env._cmd = _np.array([settle_speed, 0, 0, 0, 0, 0, 0, 0, 0], dtype=_np.float32)
+    _zero = _np.zeros(env.action_space.shape, dtype=_np.float32)
+    for _ in range(200):
+        obs, *_settle = env.step(_zero)
+
     ep_reward = 0.0
     ep_steps  = 0
     ep_count  = 0

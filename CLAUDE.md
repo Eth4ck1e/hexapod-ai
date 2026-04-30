@@ -15,7 +15,7 @@ scaffold fades out across a 4-stage curriculum so the final policy is
 fully autonomous and able to learn emergent behaviors (max-speed
 exploration, rolling tricks) beyond what the analytical gait can do.
 
-## Current state
+## Current state (2026-04-29)
 
 Gait library uses **closed-form, vectorized IK** with full overlay
 support (stance width/height, body tilt, spin). All gait math validated
@@ -23,6 +23,38 @@ sub-millimeter against MJCF FK. The `IK_gait.py` sandbox tested every
 overlay independently (smart test script with 19 phases covers them
 all). Training pipeline integrated and benchmarked at the workstation's
 sweet spot. Long-form curriculum training runs reasonable.
+
+**Best policy: BC v2** (`checkpoints/bc_pretrained_v2/policy.zip`,
+gitignored). Trained via supervised behavioral cloning on 20M scaffold
+demonstrations across stage=3 (full motion). Walks indefinitely at
+clean cmds, completes ~70% of stochastic stage=3 episodes — failures
+are `no_progress` at near-extreme combined cmds (real operational
+limit, not a bug). RL fine-tuning attempts (v3, v6) have so far ended
+worse than BC v2 because PPO's stochastic noise destabilizes the
+working walker faster than it can find improvements. See "Methodology
+learnings" below for the noise-vs-refinement tradeoff.
+
+**Per-platform split (added 2026-04-26).** macOS can't open the MuJoCo
+viewer inside a SubprocVecEnv worker (Cocoa main-loop requirement;
+workers run as plain `python`, not `mjpython`). So we forked the env
+and trainer:
+
+- `envs/hexapod_env.py` + `train.py` — Linux/workstation originals.
+  In-worker viewer for `WATCH_LIVE=True` works fine here.
+- `envs/hexapod_env_mac.py` + `train_mac.py` — Mac variants. No
+  in-worker viewer. Instead, env-0 publishes its qpos+qvel+sim_time to
+  a 400-byte shared-memory region (`hexapod_live_state`) every step,
+  and a separate `mjpython live_viewer.py` process reads it and
+  renders. The Mac variant also carries fine-tuning improvements that
+  haven't been backported to the Linux version yet — drift penalty,
+  polar-sampled translation, tightened speed range, all-overlays mask
+  experiments. Merge to Linux once they're proven valuable.
+
+All other scripts (`gait/`, `simple_gait.py`, `IK_gait.py`, `pilot.py`,
+`watch.py`, `watch_demo.py`, `pilot_ai.py`, etc.) are cross-platform.
+Tools that import the env auto-pick the right module by `sys.platform`
+where it matters; the gym observation space is identical between the
+two envs.
 
 ## Architecture (locked decisions)
 
@@ -98,24 +130,52 @@ sweet spot. Long-form curriculum training runs reasonable.
   tibia formula→MJCF offset comes out to ≈ -1.346 rad (= 90° + 13°,
   the angular offset from "tibia along straight extension" to "MJCF
   tibia=0 link direction").
-- **Speed-magnitude variation is intentionally NOT in the curriculum.**
-  Translation cmd is always at full MAX_SPEED with random heading.
-  The current Controller models speed via stride scaling only, NOT
-  period modulation — period stays fixed at GAIT_PERIOD. The IK_gait
-  sandbox proved variable-period speed control works (factor in
-  [-1, +1] sweeps period and stride together for a wide envelope),
-  but the env's Controller deliberately uses the simpler stride-only
-  model for now to keep the policy's reward signal stable. Revisit
-  when we want a wider speed range.
+- **Speed-magnitude variation status (Mac variant only as of 2026-04-26).**
+  Linux env keeps fixed-MAX_SPEED + random heading sampling. Mac env
+  uses **polar sampling with magnitude clamped to [40%, 85%] of
+  MAX_SPEED** — wide enough to teach speed control, narrow enough to
+  avoid the "stand still" failure mode (magnitude ≈ 0 episodes
+  encourage do-nothing policies) and the "ragged edge" failure mode
+  (magnitude = MAX_SPEED sits at scaffold capacity). The Controller
+  still models speed via stride-scaling only (no period modulation
+  yet); IK_gait sandbox has the period+stride proof-of-concept for
+  when we eventually want a wider envelope.
 - **macOS viewer requires `mjpython`**, not plain `python`, for any
   script that calls `mujoco.viewer.launch_passive`. Affects
-  `simple_gait.py`, `IK_gait.py`, `pilot.py`, `watch.py`,
-  `watch_tiled.py`. Headless (`train.py`) uses plain `python` — the
-  env-0 live-watch viewer works through SubprocVecEnv worker
-  subprocesses where MuJoCo's viewer binding is fine.
+  `simple_gait.py`, `IK_gait.py`, `pilot.py`, `pilot_ai.py`, `watch.py`,
+  `watch_demo.py`, `watch_tiled.py`, `live_viewer.py`. Headless (`train.py`,
+  `train_mac.py`, `bench_n_envs.py`) use plain `python`.
+- **`WATCH_LIVE=True` works differently per platform.** Linux: env-0
+  worker calls `launch_passive` directly inside the SubprocVecEnv
+  subprocess (works because Linux has no Cocoa main-loop restriction).
+  Mac: env-0 worker writes state to `hexapod_live_state` shared memory
+  every step; user runs `mjpython live_viewer.py` in a separate
+  terminal to render that state. The viewer process IS mjpython, the
+  worker is plain python — no Cocoa conflict. **Don't try to launch
+  train_mac.py with mjpython expecting workers to inherit it; they
+  don't, because mjpython is a shell wrapper that invokes the
+  underlying python interpreter, and `sys.executable` in the workers
+  points at python.**
 - **`pilot.py` keyboard layout collides with mujoco viewer hotkeys.**
   Accepted as fine for testing only. Long-term: gamepad support via
   pygame; gamepad axes don't conflict.
+- **Pitch sign convention** (resolved 2026-04-29). The env's
+  `_body_pitch_roll` extracts pitch via standard right-hand-rule math
+  (positive = nose DOWN). The cmd convention and the gait controller
+  use aerospace (positive = nose UP). The two were inconsistent for
+  multiple sessions, surfacing as "scaffold can't track tilt" / "BC
+  policy tilts wrong way" — neither was the actual bug. Fixed by
+  negating `asin()` in `_body_pitch_roll`. Roll has no analogous bug
+  (X-axis rotation conventions agree).
+- **`StageManagerCallback` must use `env_method`, NOT `set_attr`** to
+  mutate `gait_scale` / `stage` on the VecEnv. SB3's `set_attr` only
+  mutates the outer `Monitor` wrapper; gym wrappers don't propagate
+  setattr to the wrapped env. We added `set_gait_scale()` /
+  `set_stage()` methods on `HexapodEnv` and the callback uses
+  `env_method("set_gait_scale", value)` to reach the inner env. Older
+  set_attr-based code silently failed — entire training runs were at
+  the initial gait_scale value despite TB recording the intended
+  schedule.
 - **Legacy demo scripts are now broken**: `sandbox.py`, `gait_design.py`,
   `walk_test.py` import deleted constants from the old env. They've
   been superseded by `simple_gait.py`, `IK_gait.py`, `pilot.py`. Safe
@@ -127,21 +187,27 @@ sweet spot. Long-form curriculum training runs reasonable.
 
 ## Files at a glance
 
-| Path | Purpose |
-|------|---------|
-| `gait/controller.py` | Stateful gait Controller. Closed-form vectorized IK. |
-| `gait/__init__.py` | Public API exports (Controller, link lengths, NEUTRAL_POSE, etc.). |
-| `simple_gait.py` | Demo viewer — toggle cycles for any cmd slot via Controller. |
-| `IK_gait.py` | Sandbox with all overlays + smart-test script (19-phase exercise). |
-| `pilot.py` | Keyboard teleop in mujoco viewer. |
-| `envs/hexapod_env.py` | Gym env wrapping `Controller` for PPO. |
-| `train.py` | Curriculum training entry point + auto-TB + live env-0 watcher. |
-| `bench_n_envs.py` | SubprocVecEnv N_ENVS sweep — finds CPU sweet spot. |
-| `watch.py` | Render trained checkpoint in viewer. |
-| `watch_tiled.py` | N-up grid render of trained checkpoint. |
-| `models/phantomx.xml` | MJCF model. Mesh path fixed to `./meshes/phantomx`. |
-| `docs/kinematics.md` | IK derivation, leg geometry, MJCF axis conventions. |
-| `snapshots/` | Historical versions before refactors (revert points). |
+| Path | Purpose | Platform |
+|------|---------|----------|
+| `gait/controller.py` | Stateful gait Controller. Closed-form vectorized IK. | both |
+| `gait/__init__.py` | Public API exports (Controller, link lengths, NEUTRAL_POSE, etc.). | both |
+| `simple_gait.py` | Demo viewer — toggle cycles for any cmd slot via Controller. | both |
+| `IK_gait.py` | Sandbox with all overlays + smart-test script (19-phase exercise). | both |
+| `pilot.py` | Keyboard teleop driving the analytical scaffold directly. | both |
+| `pilot_ai.py` | Keyboard teleop driving a trained PPO checkpoint. Hold Shift = run mode (2× speed). | both |
+| `envs/hexapod_env.py` | Linux gym env. In-worker viewer for `WATCH_LIVE=True`. | Linux |
+| `envs/hexapod_env_mac.py` | Mac gym env. Shared-memory state mirror; drift penalty; tightened speed sampling. | Mac |
+| `train.py` | Linux training. In-worker viewer. Stage-1 = vx,vy at fixed MAX_SPEED. | Linux |
+| `train_mac.py` | Mac training. SHM state mirror. `--resume`, `--bc-init`, `--log-std-init` flags. Supports `INITIAL_STAGE` and `SKIP_SCAFFOLD` config knobs. | Mac |
+| `pretrain_bc.py` | Supervised behavioral cloning of scaffold demonstrations. Produces a PPO-compatible policy that mimics the scaffold's joint targets. `--stage`, `--steps`, `--epochs`, `--out` flags. | Mac (extensible) |
+| `live_viewer.py` | Reads `hexapod_live_state` shm and renders — pair with `train_mac.py`. | Mac |
+| `bench_n_envs.py` | SubprocVecEnv N_ENVS sweep — finds CPU sweet spot. | both |
+| `watch.py` | Render trained checkpoint with random env-sampled cmds. Settles to neutral first. | both |
+| `watch_demo.py` | Render trained checkpoint through a 23-phase preset cmd script. Settles first. | both |
+| `watch_tiled.py` | N-up grid render of trained checkpoint. | both |
+| `models/phantomx.xml` | MJCF model. Mesh path fixed to `./meshes/phantomx`. | both |
+| `docs/kinematics.md` | IK derivation, leg geometry, MJCF axis conventions. | both |
+| `snapshots/` | Historical versions before refactors (revert points). | both |
 
 ## Working-style preferences (apply to all conversations)
 
@@ -167,15 +233,52 @@ caches `feet_body` for `_get_obs()` to read. Don't reintroduce
 separate `predict()` + `compute_foot_targets()` calls in the same
 step — that re-runs the whole gait pipeline twice for no gain.
 
-## Workstation environment (Windows host)
+## User's machines
 
-The user's primary training machine is a Windows 11 desktop with the
-project at `C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`.
+The user has three machines, and which one is "primary" depends on the
+session. Most day-to-day development and training happens on the M3 Max
+MacBook Pro — the workstation is for separate sessions when the user is
+at the Windows desktop. The M1 Max Mac Studio is a third machine, less
+commonly used for training.
+
+### M3 Max MacBook Pro (primary dev + training, current session)
+
+- **Hardware**: Apple M3 Max (up to 16-core CPU, up to 40-core GPU,
+  unified memory ~400 GB/s). Faster than the workstation for the
+  hexapod RL workload by roughly 2× — the unified memory architecture
+  removes the CPU↔RAM bottleneck that bounds `mj_step` throughput on
+  discrete-memory systems. SubprocVecEnv runs scale better here than on
+  the workstation despite the workstation's 96MB L3.
+- **Project path**: `/Users/mitchelltrafford/Documents/hexapod-ai`
+- **Python**: `.venv/` with Python 3.11. Activate via
+  `source .venv/bin/activate`, or call `./.venv/bin/python` directly.
+- **Shell**: zsh.
+- **macOS specifics**: viewer needs `mjpython` for `launch_passive` (see
+  per-platform-split note above).
+- **GPU/MJX potential**: when the user wants to commit to a faster-
+  iteration training stack, MJX (MuJoCo XLA) on JAX-Metal would run
+  physics rollouts on the M3 Max's 40-core GPU. Realistic 50–100×
+  wall-clock speedup over current SubprocVecEnv. Non-trivial port: the
+  gait controller's IK and the env step would have to be rewritten in
+  pure JAX (no Python control flow that depends on values, no NumPy).
+  Status as of 2026-04-27: not started; user is iterating reward
+  shaping first — don't port a moving target.
+
+### Workstation (Windows 11 desktop)
+
+The user's secondary training machine when they're at the Windows
+desktop, with the project at
+`C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`.
 
 - **Hardware**: AMD Ryzen 7 7800X3D (8C/16T, 96 MB L3 V-Cache,
   AVX-512), 32 GB RAM, RTX 5060 Ti. The 96 MB L3 fits MuJoCo's per-env
-  physics working set, which is why this box outpaces the M1 Max for
-  SubprocVecEnv runs.
+  physics working set; outpaces the M1 Max Studio for SubprocVecEnv
+  runs but is slower than the M3 Max MacBook Pro by roughly 2×.
+- **GPU note**: SB3 PPO on the 5060 Ti is *slower* than CPU PPO on the
+  same machine (~2,750 vs 5,000+ SPS) because the MLP policy is small
+  enough that GPU dispatch overhead dominates gradient compute. Don't
+  set `device="cuda"` for SB3 PPO. The 5060 Ti would only be useful if
+  the user ports to MJX (physics on GPU) — not just the policy.
 - **Python**: `.venv/` with Python 3.11. Activate via
   `.\.venv\Scripts\Activate.ps1`, or call `.\.venv\Scripts\python.exe`
   directly. System `python` on PATH is a different interpreter and
@@ -251,6 +354,191 @@ redundant now that meshes are vendored under `models/meshes/`.
   Sub-mm error per leg means the refactor preserves correctness;
   any larger error means a sign/offset bug that won't surface until
   off-rest poses and is best caught early.
+
+## Training tuning levers (Mac variant — actively iterated)
+
+Things we keep adjusting between training runs as the policy improves.
+All in `envs/hexapod_env_mac.py` and `train_mac.py`. The Linux versions
+don't have these knobs yet — backport whichever land as keepers.
+
+### Reward shaping
+
+- **Drift penalty** (`envs/hexapod_env_mac.py:YAW_DRIFT_W` /
+  `PITCH_DRIFT_W` / `ROLL_DRIFT_W`, gated by `YAW_GATE` / `TILT_GATE`).
+  *Linear* penalty on `|actual_wz|`/`|actual_pitch|`/`|actual_roll|`
+  when the corresponding cmd is near zero. Sharper gradient near zero
+  than the squared tracking term — fixed the slow-drift problem where
+  the bot would walk straight-ish but slowly turn or hold a tilt
+  because the squared error was ~0 close to zero. Default 1.0/0.5/0.5
+  weights with 0.05 rad/s and 3° gates. **If the bot looks rigid or
+  refuses to move at all, these are too high — reduce by 50% and
+  retry.** Drift penalty + scaffold-strong training together can
+  produce a "do nothing" policy that aces every reward except actual
+  movement.
+- **Translation magnitude range** (`SPEED_MIN_FRAC=0.4`,
+  `SPEED_MAX_FRAC=0.85`). Was [0, MAX_SPEED] originally; tightened to
+  [40%, 85%] to remove "stand still" episodes (which encourage do-
+  nothing) and "ragged edge" episodes (full-MAX_SPEED is at scaffold
+  capacity, looks ugly). Heading is still random 0-360°.
+- **Per-slot error scales** (`_err_inv_scales`). Each cmd error is
+  divided by the slot's "full deviation" before squaring, so a
+  velocity error and a pitch error contribute commensurately to the
+  gaussian tracking reward. Without this, big-magnitude slots
+  dominate and small-magnitude slots provide no signal.
+- **Body angular-velocity penalty** (`ANGVEL_W=0.02`). Damps wobble in
+  pitch/roll rates that don't show up cleanly in absolute pose
+  tracking. If walking gait inherently produces >3° pitch oscillation,
+  this fights legitimate motion — reduce it.
+
+### Curriculum schedule
+
+- **Stage masking is per-skill, not all-at-once.** Adding many cmd
+  slots simultaneously in stage 1 (full overlays at once) produced
+  worse results than the original Linux per-stage progression. The
+  Mac variant currently uses `STAGE_CMD_MASK[1] = [1,1,0,0,0,0,0,0,0]`
+  — translation only — with drift penalty implicitly training "stay
+  straight + stay level + don't bounce." Add wz / height / width /
+  pitch / roll one (or a small group) per future stage. Don't go back
+  to all-at-once unless you have a plan for the "do nothing" trap.
+- **Schedule constants** in `train_mac.py`: `STAGE_MIN_STEPS[1]`
+  controls fade-progress denominator; `STAGE_FADE_RANGE` controls when
+  within the stage the fade happens. Recent successful pattern:
+  8M scaffold-strong / 4M fade / 13M autonomous = 25M total.
+- **Per-stage `gait_scale` envelope**: stage 1 = (1.0, 0.0) for the
+  Mac short runs (fully fade within the single-stage run); the
+  original Linux multi-stage curriculum uses (1.0, 1.0) → (1.0, 0.6)
+  → (0.6, 0.0) → (0.0, 0.0).
+
+### Auto-stop and resume
+
+- **`EARLY_STOP_*`** in `train_mac.py` — only active in autonomous
+  phase (gait_scale == 0.0). Halts training when rolling tracking
+  reward plateaus (no improvement > 0.005 over 3M steps, after a 3M
+  warmup, with min reward 0.5). Saves wall time when the policy has
+  converged before TOTAL_STEPS.
+- **`python train_mac.py --resume`** — load latest checkpoint from
+  `CKPT_DIR` and continue training. Resume mode forces gait_scale=0.0
+  throughout (no scaffold replay) and gives a fresh early-stop warmup
+  window. Use this for quick fine-tunes after small reward / sampling
+  changes — much faster than re-running from scratch. Pass an explicit
+  path with `--resume <path-without-.zip>` to fine-tune from a
+  specific older checkpoint.
+
+## Lessons learned about RL training (collected over Mac iteration)
+
+These are failure modes we've actually hit, and what we learned from
+each. Worth re-reading before launching a new training run.
+
+- **"Do nothing" policy.** Drift penalty + many "stand still" episodes
+  + scaffold doing the walking → policy converges on zero residual,
+  which costs nothing in drift_pen and tracks well during scaffold-
+  strong phase. Once scaffold fades, bot just stands. Mitigation:
+  remove stand-still episodes from sampling distribution (clamp speed
+  away from 0); reduce drift penalty weights; lengthen autonomous
+  phase so policy has time to discover non-zero residuals.
+- **"Ragged edge" gait.** Full MAX_SPEED commands sit at scaffold
+  stride capacity — any extra residual destabilizes. Mitigation: clamp
+  upper end of speed sampling (e.g., 85% MAX_SPEED) so scaffold has
+  headroom; residuals can refine without fighting saturation.
+- **Spawn-state matters for evaluation.** Eval scripts that don't
+  settle the bot before showing it produce "looks weird from the
+  start" perception. All eval scripts (`watch.py`, `watch_demo.py`,
+  `pilot_ai.py`) now run a 200-step settling loop with cmd=0 before
+  starting the real evaluation. Do not remove this.
+- **Cmd-distribution overfit.** Policy trained on translation-only
+  doesn't know what to do with wz/pitch/roll commands. `watch_demo.py`
+  cycles through ALL phases including the untrained ones — bot may
+  ignore those phases or wobble. Not a bug. Confirm trained skills
+  work in the relevant phases; expect untrained ones to look weird.
+- **Autonomous phase is where the actual learning happens.** During
+  scaffold-strong, the residual barely matters because the scaffold
+  output dominates. Most of the policy's "skill" is acquired during
+  the fade and autonomous phases. Front-loading the fade (start fading
+  at e.g. 8M instead of waiting for 40M like the original schedule)
+  compresses training time substantially when the scaffold already
+  walks well.
+- **Progress signals to watch in TensorBoard**: `stage/avg_tracking`
+  (target ≥ 0.65), `stage/fall_rate` (target ≤ 0.30),
+  `stage/no_progress_rate` (truth-teller for "is bot actually walking"
+  — added 2026-04-28), `stage/fail_rate` (= fell ∪ no_progress),
+  `stage/mean_ep_length` (target → 2000 = max), `rollout/ep_rew_mean`
+  (overall progress curve), `train/std` ("is the policy converging?"
+  — should slowly decrease). Reward dipping when scaffold fades is
+  fine if it recovers within the autonomous phase. Dipping and not
+  recovering means scaffold was carrying everything and policy didn't
+  learn.
+
+## Multi-method training pipeline (planned 2026-04-29)
+
+The project's training methodology evolved from "pure PPO with curriculum
+fade" to a staged hybrid pipeline. Each phase uses the most-appropriate
+method for its specific goal; advance only when the current axis is
+"good enough."
+
+| Phase | Method | Goal | Status |
+|---|---|---|---|
+| 0 | BC pretraining (`pretrain_bc.py`) | Bootstrap a working walker via supervised learning on scaffold demos | DONE — BC v2 |
+| 1 | DAgger (script not yet built) | Refine BC into a flawless mimic — close covariate-shift gap | DEFERRED |
+| 2 | Small-noise PPO (`train_mac.py --bc-init … --log-std-init -3.0`) | Refine reward-coded axes (foot dev, sliding) past scaffold quality | CURRENT |
+| 3 | Domain randomization (env modifications + RL or DAgger) | Sim-to-real robustness | not started |
+| 4 | Distillation (script TBD) | Compress to small net for ESP32-S3 | not started |
+
+**Phase 2 noise calibration matters a lot.** PPO's stochastic noise is
+both required (gradient computation) and dangerous (destabilizes a
+working walker). With a BC-initialized policy:
+- `log_std=0.0` (default; std=1.0): random actions, bot falls instantly.
+- `log_std=-2.0` (std≈0.135): too noisy for refinement; v6 run ended
+  worse than BC v2.
+- `log_std=-3.0` (std≈0.05): refinement zone, ~2.3° per-joint jitter.
+  Recommended starting point for refinement runs.
+- `log_std=-3.5` (std≈0.03): polish, ~1.4° per-joint jitter.
+- Going below -4.0 starves PPO of gradient signal.
+
+Always launch BC-init runs with `--log-std-init -3.0` or lower when
+the goal is refinement (not from-scratch learning). The `--bc-init`
+flag defaults to `log_std=-2.0` for safety, but for an already-working
+walker you almost always want lower.
+
+**DAgger sketch (when it gets built).** New script `dagger_train.py`
+(~150 LOC), reuses `pretrain_bc.train_bc` and the env's
+`info["bc_target"]` per step. Loop:
+1. Drive bot at gait_scale=0.0 with current policy (deterministic).
+2. Collect (obs, scaffold's-action-at-this-state) pairs each step.
+3. Aggregate with original BC dataset.
+4. Retrain policy on augmented data.
+5. Repeat 3-5 times.
+
+No noise, no exploration, no PPO — pure supervised learning on the
+policy's own state distribution. Best tool for "make BC v2 a flawless
+mimic." Cannot exceed scaffold quality (DAgger's ceiling).
+
+## MJX exploration findings (2026-04-29)
+
+User benchmarked Brax PPO on Ant to evaluate JAX-Metal speedup before
+committing to a hexapod MJX port.
+
+**Verdict on Apple Silicon GPU + MJX:** **blocked**. `jax-metal` v0.1.1
+(latest, last release Oct 2024) doesn't implement the Cholesky
+decomposition op (`mhlo.cholesky`). MJX's smooth-dynamics solver calls
+`jax.scipy.linalg.cho_factor` on the mass matrix every step, so MJX
+cannot run on Apple Silicon GPU at all today. No newer/beta jax-metal
+on PyPI. Apple's release cadence is ~18 months stale.
+
+**CPU MJX on M3 Max:** ~9,000 steps/sec with 2048 vmap'd envs (Brax
+PPO on Ant). Compared to current SubprocVecEnv ~5,000 steps/sec, that's
+only ~1.8× speedup. Not worth the multi-day porting effort for that
+margin.
+
+**Real MJX upside lives on CUDA.** The 5060 Ti workstation should hit
+~100,000–500,000 steps/sec (50–100× current Mac throughput). When
+training moves to the workstation, the MJX port becomes worth doing.
+A test environment lives at `~/.venv-mjx-test/` and a benchmark script
+at `~/mjx_ant_bench.py` — both are reusable on the workstation by
+swapping `jax-metal` for `jax[cuda12]` and re-running with
+`JAX_PLATFORMS=cuda`.
+
+**Decision logged:** stay on SubprocVecEnv on Mac. Plan MJX port for
+when training moves to workstation.
 
 ## Memory / sync
 

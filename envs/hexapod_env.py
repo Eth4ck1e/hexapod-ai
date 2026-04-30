@@ -160,11 +160,24 @@ class HexapodEnv(gym.Env):
         # call — used by _get_obs() to avoid recomputing the whole gait pipeline.
         self._latest_feet_body = np.zeros((6, 3), dtype=np.float32)
 
-        # gait_scale is mutated externally by the GaitFadeCallback.
+        # gait_scale is mutated externally by the StageManagerCallback. CRITICAL:
+        # the callback must update via env_method("set_gait_scale", value),
+        # NOT set_attr — gym wrappers don't propagate setattr to the wrapped
+        # env, so set_attr silently leaves this attribute at its initial value.
+        # See set_gait_scale below.
         self.gait_scale = 1.0
 
         self._viewer   = None
         self._renderer = None
+
+    # Setters that propagate correctly through gym wrappers (Wrapper forwards
+    # getattr to inner env, so env_method finds and calls these on the inner
+    # HexapodEnv even when the env is wrapped in Monitor/TimeLimit).
+    def set_gait_scale(self, value):
+        self.gait_scale = float(value)
+
+    def set_stage(self, value):
+        self.stage = int(value)
 
     # ------------------------------------------------------------------
     # Standard gym lifecycle

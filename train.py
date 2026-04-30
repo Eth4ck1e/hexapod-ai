@@ -115,8 +115,11 @@ class StageManagerCallback(BaseCallback):
     def _on_training_start(self):
         self._track_sums  = np.zeros(self.n_envs, dtype=np.float64)
         self._step_counts = np.zeros(self.n_envs, dtype=np.int64)
-        self.training_env.set_attr("stage", self.current_stage)
-        self.training_env.set_attr("gait_scale", STAGE_GAIT_SCALE[self.current_stage][0])
+        # CRITICAL: env_method, not set_attr. set_attr only mutates the outer
+        # Monitor wrapper; the inner HexapodEnv never sees the update. See
+        # the note in HexapodEnv.__init__ next to `self.gait_scale = 1.0`.
+        self.training_env.env_method("set_stage", self.current_stage)
+        self.training_env.env_method("set_gait_scale", STAGE_GAIT_SCALE[self.current_stage][0])
         print(f"[stage] starting stage {self.current_stage} at step 0  "
               f"(gait_scale={STAGE_GAIT_SCALE[self.current_stage][0]:.2f})")
 
@@ -136,9 +139,10 @@ class StageManagerCallback(BaseCallback):
                 self._track_sums[i]  = 0.0
                 self._step_counts[i] = 0
 
-        # Compute and apply gait_scale for current stage.
+        # Compute and apply gait_scale for current stage. env_method, not
+        # set_attr (set_attr would only mutate the Monitor wrapper).
         gait_scale = self._current_gait_scale()
-        self.training_env.set_attr("gait_scale", gait_scale)
+        self.training_env.env_method("set_gait_scale", gait_scale)
 
         # Periodically log progress and check advance gate.
         if self.num_timesteps % 50_000 == 0:
@@ -181,8 +185,8 @@ class StageManagerCallback(BaseCallback):
         self.stage_start_step = self.num_timesteps
         self.episode_tracking.clear()
         self.episode_lengths.clear()
-        self.training_env.set_attr("stage", self.current_stage)
-        self.training_env.set_attr("gait_scale", STAGE_GAIT_SCALE[self.current_stage][0])
+        self.training_env.env_method("set_stage", self.current_stage)
+        self.training_env.env_method("set_gait_scale", STAGE_GAIT_SCALE[self.current_stage][0])
         print(f"[stage] ADVANCED {prev} → {self.current_stage} at step "
               f"{self.num_timesteps:,}  (avg_track={avg_track:.3f}, "
               f"fall_rate={fall_rate:.2%})")
