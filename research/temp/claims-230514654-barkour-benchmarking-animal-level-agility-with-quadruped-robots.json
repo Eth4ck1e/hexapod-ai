@@ -1,0 +1,16 @@
+[
+  {
+    "claim": "The Barkour paper (Caluwaerts et al. 2023) trains specialist locomotion skills using on-policy RL then distills into a Locomotion-Transformer generalist policy; training budget not explicitly reported in abstract.",
+    "stance": "neutral",
+    "stance_target": "training budget for Barkour quadruped locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "Google custom quadruped, on-policy RL + distillation pipeline, abs page only",
+    "quoted_support": "we train specialist locomotion skills using on-policy reinforcement learning methods and combine them with a high-level navigation controller. In the second approach, we distill the specialist skills into a Transformer-based generalist locomotion policy",
+    "numbers": [],
+    "entities": ["Google", "Barkour", "Locomotion-Transformer"],
+    "time_period": "2023",
+    "region": "USA (Google)",
+    "confidence": "medium",
+    "source_note_id": "230514654-barkour-benchmarking-animal-level-agility-with-quadruped-robots"
+  }
+]

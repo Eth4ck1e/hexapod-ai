@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "Hwangbo et al. 2019 train ANYmal command-conditioned locomotion using TRPO on a single desktop PC (1 CPU + 1 GPU) with the policy converging in approximately 4 hours wall clock.",
+    "stance": "supports",
+    "stance_target": "pre-GPU-parallelism era locomotion RL required hours on modest single-machine hardware",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped, RaiSim-family simulator with actuator nets, TRPO algorithm, circa 2019",
+    "quoted_support": "For training command-conditioned and high-speed locomotion, TRPO finished training in nine days of simulated time, which corresponds to four hours of computation in real time.",
+    "numbers": ["4 hours wall clock (locomotion)", "11 hours wall clock (recovery)", "~250M transitions total", "1 GPU", "1 CPU"],
+    "entities": ["ANYmal", "ETH Zurich", "TRPO"],
+    "time_period": "2019",
+    "region": "Switzerland",
+    "confidence": "high",
+    "source_note_id": "190108652-learning-agile-and-dynamic-motor-skills-for-legged-robots-2"
+  },
+  {
+    "claim": "The Hwangbo 2019 simulator with actuator nets runs at ~500K simulation time steps per second on a single desktop, enabling approximately 250M sample generation in 4 hours.",
+    "stance": "supports",
+    "stance_target": "simulation speed is the primary bottleneck; faster simulation directly multiplies sample budget in fixed wall-clock time",
+    "evidence_type": "empirical",
+    "scope_conditions": "Custom RaiSim-based simulator with 12-joint actuator networks; single CPU desktop; not GPU-parallelized",
+    "quoted_support": "the full hybrid simulator, including a rigid-body simulation and the actuator nets, runs at nearly 500K time steps per second, which allows the simulation to run roughly a thousand times faster than real time.",
+    "numbers": ["500K time steps/second (with actuator nets)", "900K time steps/second (rigid-body only)", "~1000x faster than real time"],
+    "entities": ["RaiSim", "ANYmal"],
+    "time_period": "2019",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "190108652-learning-agile-and-dynamic-motor-skills-for-legged-robots-2"
+  },
+  {
+    "claim": "Hwangbo 2019 uses 30 parallel ANYmal instances with randomized inertial properties for domain randomization — orders of magnitude fewer parallel instances than the later Isaac Gym era (4096).",
+    "stance": "supports",
+    "stance_target": "pre-GPU parallelism era used very few parallel instances vs. current practice",
+    "evidence_type": "empirical",
+    "scope_conditions": "CPU-based simulator; 2019",
+    "quoted_support": "we robustify the policy by training with 30 different ANYmal models with stochastically sampled inertial properties.",
+    "numbers": ["30 parallel instances"],
+    "entities": ["ANYmal", "TRPO"],
+    "time_period": "2019",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "190108652-learning-agile-and-dynamic-motor-skills-for-legged-robots-2"
+  },
+  {
+    "claim": "Hwangbo 2019 requires 'hundreds of millions of samples' to train a complicated legged policy, making fast simulation (not GPU parallelism) the key enabler.",
+    "stance": "supports",
+    "stance_target": "legged locomotion RL requires very large sample counts even with simple CPU-based training",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped, TRPO, CPU-simulator era; 2019",
+    "quoted_support": "Because we need hundreds of millions of samples to train a complicated policy, this solver was key to our work.",
+    "numbers": ["hundreds of millions of samples"],
+    "entities": ["ANYmal"],
+    "time_period": "2019",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "190108652-learning-agile-and-dynamic-motor-skills-for-legged-robots-2"
+  },
+  {
+    "claim": "Hwangbo 2019 trains with a two-stage pipeline: (1) actuator network pretrain via self-supervised learning (<4 min data collection from 12 physical actuators), then (2) RL policy training (4-11 hours).",
+    "stance": "supports",
+    "stance_target": "staged training pipelines (pretrain then RL) are established practice for legged locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "Requires physical robot for actuator net data; ANYmal; 2019",
+    "quoted_support": "Data collection took less than 4 min since the data can be collected in parallel from the 12 identical actuators on ANYmal. Data was collected at 400 Hz, therefore the resulting dataset contains more than a million samples.",
+    "numbers": ["<4 min actuator data collection", "1M+ actuator samples", "4 hours locomotion RL", "11 hours recovery RL"],
+    "entities": ["ANYmal", "actuator network"],
+    "time_period": "2019",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "190108652-learning-agile-and-dynamic-motor-skills-for-legged-robots-2"
+  }
+]

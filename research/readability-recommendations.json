@@ -1,0 +1,64 @@
+{
+  "recommendations": [
+    {
+      "id": "rec-1",
+      "category": "split-sentence",
+      "severity": "minor",
+      "section": "## 4. Hardware Context — Single-GPU vs Multi-GPU Norms (4.3 lead-in)",
+      "current": "The user's reported **240k it/s effective on a 5060 Ti via WSL2** is consistent with the public throughput data: 240k SPS sits roughly between the 120k SPS Berkeley Humanoid flat number and the 405-417k SPS Go1/Spot quadruped numbers on an A100. That's expected — the 5060 Ti is roughly half an A100's compute, and a 6-leg hexapod has more contacts than a Go1 quadruped. **A 200M-step Brax PPO run on 240k SPS effective throughput finishes in ~14 minutes; a 500M-step run finishes in ~35 minutes.** That's the same band as MuJoCo Playground's published wall-clocks for Go1Joystick and Go1Handstand.",
+      "recommended": "The user's reported **240k it/s effective on a 5060 Ti via WSL2** is consistent with the public throughput data: 240k SPS sits roughly between the 120k SPS Berkeley Humanoid flat number and the 405-417k SPS Go1/Spot quadruped numbers on an A100. That is expected. The 5060 Ti is roughly half an A100's compute, and a 6-leg hexapod has more contacts than a Go1 quadruped. **A 200M-step Brax PPO run on 240k SPS effective throughput finishes in ~14 minutes; a 500M-step run finishes in ~35 minutes.** That's the same band as MuJoCo Playground's published wall-clocks for Go1Joystick and Go1Handstand.",
+      "rationale": "Splits the compound sentence after 'That's expected' into two simpler ones for cleaner cadence."
+    },
+    {
+      "id": "rec-2",
+      "category": "split-sentence",
+      "severity": "minor",
+      "section": "## 6. Recommendation (6.2 closing sentence)",
+      "current": "A user budget of **100M-500M per session × 4-10 sessions = 400M-5B aggregate** sits squarely in this published band — comparable to ETH PACE (2.95B) and the curriculum-jumping pipeline (2.26B), and well below the Liu hexapod ceiling. **Anywhere in 400M-5B aggregate is on-trend; below ~50M aggregate would be under-trained for a hexapod-with-AMP project; above ~10B aggregate would be excessive without a clear novel-task justification.**",
+      "recommended": "A user budget of **100M-500M per session × 4-10 sessions = 400M-5B aggregate** sits squarely in this published band — comparable to ETH PACE (2.95B) and the curriculum-jumping pipeline (2.26B), and well below the Liu hexapod ceiling.\n\n**Anywhere in 400M-5B aggregate is on-trend.** Below ~50M aggregate would be under-trained for a hexapod-with-AMP project; above ~10B aggregate would be excessive without a clear novel-task justification.",
+      "rationale": "Promotes the load-bearing 'on-trend' verdict to its own paragraph and breaks an overlong stacked sentence."
+    },
+    {
+      "id": "rec-3",
+      "category": "bold-keyterms",
+      "severity": "minor",
+      "section": "## 5.4 Median band, by task type (lead-in)",
+      "current": "Aggregating the outliers and the table-2 totals:",
+      "recommended": "Aggregating the outliers and the per-paper totals from Section 2:",
+      "rationale": "Removes the mechanical 'table-2' label in favor of a reader-facing reference."
+    },
+    {
+      "id": "rec-4",
+      "category": "split-sentence",
+      "severity": "minor",
+      "section": "## 6.4 AMP-specific overhead",
+      "current": "The discriminator forward+backward pass is **roughly free relative to the PPO actor-critic update** for the 2-layer MLP discriminators all surveyed AMP papers use ([1024, 512] in Liu SJTU hexapod [[learning-natural-and-robust-hexapod-locomotion-over-complex-terrains-via-motion]] and CAMP [[learning-multi-skill-legged-locomotion-using-conditional-adversarial-motion-prio]]; analogous in bipedal AMP [[learning-bipedal-walking-on-a-quadruped-robot-via-adversarial-motion-priors]] and walk-fly AMP [[learning-to-walk-and-fly-with-adversarial-motion-priors]]).",
+      "recommended": "The discriminator forward+backward pass is **roughly free relative to the PPO actor-critic update** for the 2-layer MLP discriminators all surveyed AMP papers use: [1024, 512] in Liu SJTU hexapod [[learning-natural-and-robust-hexapod-locomotion-over-complex-terrains-via-motion]] and CAMP [[learning-multi-skill-legged-locomotion-using-conditional-adversarial-motion-prio]], analogous in bipedal AMP [[learning-bipedal-walking-on-a-quadruped-robot-via-adversarial-motion-priors]] and walk-fly AMP [[learning-to-walk-and-fly-with-adversarial-motion-priors]].",
+      "rationale": "Replaces a deeply nested parenthetical with a colon-led continuation; same content, easier to parse."
+    },
+    {
+      "id": "rec-5",
+      "category": "add-whitespace",
+      "severity": "minor",
+      "section": "## 5.4 closing table",
+      "current": "| Outlier real-robot (off-policy) | <1M actual | ~20 min |\n\n## 6. Recommendation",
+      "recommended": "| Outlier real-robot (off-policy) | <1M actual | ~20 min |\n\n\n## 6. Recommendation",
+      "rationale": "Adds breathing room before the load-bearing recommendation H2."
+    }
+  ],
+  "summary": {
+    "total_recommendations": 5,
+    "by_category": {
+      "merge-paragraphs": 0,
+      "break-paragraph": 0,
+      "make-list": 0,
+      "make-table": 0,
+      "bold-keyterms": 1,
+      "split-sentence": 3,
+      "remove-hr": 0,
+      "add-whitespace": 1
+    },
+    "highest_severity": "minor",
+    "expected_net_char_delta": -10
+  }
+}

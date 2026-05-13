@@ -1,0 +1,44 @@
+[
+  {
+    "claim": "The leggedrobotics/legged_gym default training config sets num_envs=4096, num_steps_per_env=24, and max_iterations=1500, implying a total of 147,456,000 (~147M) environment steps per training run.",
+    "stance": "supports",
+    "stance_target": "~147M steps over 1500 iterations is the canonical legged_gym (Rudin 2021) training budget for ANYmal with Isaac Gym",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym repo; base LeggedRobotCfg and LeggedRobotCfgPPO classes; Isaac Gym backend",
+    "quoted_support": "class env: num_envs = 4096 ... class runner: num_steps_per_env = 24 # per iteration; max_iterations = 1500 # number of policy updates",
+    "numbers": ["num_envs=4096", "num_steps_per_env=24", "max_iterations=1500", "derived_total=147,456,000 steps"],
+    "entities": ["leggedrobotics/legged_gym", "ANYmal", "ETH Zurich", "NVIDIA"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_gymlegged_gymenvsbaselegged_robot_configpy-at-master-leggedroboticslegged"
+  },
+  {
+    "claim": "The legged_gym PPO training config uses num_learning_epochs=5, num_mini_batches=4 per policy update, making the effective mini-batch size 4096 × 24 / 4 = 24,576 transitions per gradient step.",
+    "stance": "neutral",
+    "stance_target": "effective gradient batch size in legged_gym PPO",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym LeggedRobotCfgPPO defaults",
+    "quoted_support": "class algorithm: num_learning_epochs = 5; num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches",
+    "numbers": ["num_learning_epochs=5", "num_mini_batches=4", "derived_mini_batch_size=24576"],
+    "entities": ["legged_gym", "PPO", "ANYmal"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_gymlegged_gymenvsbaselegged_robot_configpy-at-master-leggedroboticslegged"
+  },
+  {
+    "claim": "legged_gym's default episode length is 20 seconds with a physics timestep of 5ms (dt=0.005) and 4x decimation (control at 50Hz), giving 400 physics steps per episode and 100 control steps per episode.",
+    "stance": "neutral",
+    "stance_target": "legged_gym control and physics rate configuration",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym base config; Isaac Gym PhysX backend",
+    "quoted_support": "class env: episode_length_s = 20 # episode length in seconds; class sim: dt = 0.005; class control: decimation = 4",
+    "numbers": ["episode_length_s=20", "dt=0.005", "decimation=4", "effective_control_hz=50"],
+    "entities": ["legged_gym"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_gymlegged_gymenvsbaselegged_robot_configpy-at-master-leggedroboticslegged"
+  }
+]

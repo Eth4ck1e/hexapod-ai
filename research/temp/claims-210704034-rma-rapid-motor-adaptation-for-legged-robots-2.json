@@ -1,0 +1,58 @@
+[
+  {
+    "claim": "RMA Phase 1 (base policy + environment encoder) trains with PPO for 15,000 iterations, each using batch size 80,000 split into 4 mini-batches, totaling 1.2 billion environment steps in approximately 24 hours on a single desktop GPU.",
+    "stance": "supports",
+    "stance_target": "1B+ steps is a published benchmark for PPO-based legged locomotion with CPU simulator",
+    "evidence_type": "empirical",
+    "scope_conditions": "A1 quadruped, RaiSim CPU simulator, PPO, 2021",
+    "quoted_support": "We train for total 15,000 iterations each of which uses batch size of 80,000 split into 4 mini-batches... Training takes roughly 24 hours on an ordinary desktop machine, with 1 GPU for policy training. In this duration, it simulates 1.2 billion steps.",
+    "numbers": ["15,000 iterations", "batch_size=80,000", "4 mini-batches", "1.2 billion total steps", "~24 hours wall clock", "1 GPU (unspecified)"],
+    "entities": ["A1 quadruped", "RMA", "UC Berkeley", "PPO"],
+    "time_period": "2021",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "210704034-rma-rapid-motor-adaptation-for-legged-robots-2"
+  },
+  {
+    "claim": "RMA Phase 2 (adaptation module, supervised learning / distillation) trains for 1,000 iterations with batch size 80,000, totaling 80 million steps in approximately 3 hours on a single desktop GPU.",
+    "stance": "supports",
+    "stance_target": "adaptation distillation phase is a separate lightweight stage (~80M steps) much smaller than the base RL phase",
+    "evidence_type": "empirical",
+    "scope_conditions": "A1 quadruped, supervised MSE loss from policy rollouts, PPO pretrained base policy, 2021",
+    "quoted_support": "We run the optimization process for 1000 iterations with a learning rate of 5e-4 each of which uses a batch size of 80,000 split up into 4 mini-batches. It takes 3 hours to train this on an ordinary desktop machine, with 1 GPU for training the policy. In this duration, it simulates 80 million steps.",
+    "numbers": ["1,000 iterations", "batch_size=80,000", "80 million steps", "3 hours wall clock", "1 GPU"],
+    "entities": ["A1 quadruped", "RMA adaptation module"],
+    "time_period": "2021",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "210704034-rma-rapid-motor-adaptation-for-legged-robots-2"
+  },
+  {
+    "claim": "RMA total training budget across both phases is approximately 1.28 billion steps (1.2B + 80M) and approximately 27 hours wall clock on a single desktop GPU.",
+    "stance": "supports",
+    "stance_target": "1-2B steps over 24-30 hours is a plausible CPU-era legged RL total budget",
+    "evidence_type": "empirical",
+    "scope_conditions": "A1 quadruped, RaiSim CPU-based simulator; total across Phase 1 and Phase 2; 2021",
+    "quoted_support": "Training takes roughly 24 hours on an ordinary desktop machine... In this duration, it simulates 1.2 billion steps. [Phase 2:] It takes 3 hours... simulates 80 million steps.",
+    "numbers": ["~1.28 billion total steps", "~27 hours total wall clock"],
+    "entities": ["RMA", "A1 quadruped"],
+    "time_period": "2021",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210704034-rma-rapid-motor-adaptation-for-legged-robots-2"
+  },
+  {
+    "claim": "RMA uses a CPU-based simulator (RaiSim) and does not use massive GPU parallelism; the 1.2B step budget required 24 hours because of CPU throughput limitations rather than GPU batch size.",
+    "stance": "supports",
+    "stance_target": "RMA's large step count (1.2B) is a direct consequence of CPU simulator constraints, not a deliberate sample budget choice",
+    "evidence_type": "empirical",
+    "scope_conditions": "RaiSim (CPU-based); contrast with Isaac Gym which achieves similar step counts in minutes",
+    "quoted_support": "Training takes roughly 24 hours on an ordinary desktop machine, with 1 GPU for policy training. In this duration, it simulates 1.2 billion steps.",
+    "numbers": ["1.2 billion steps in 24 hours"],
+    "entities": ["RaiSim", "A1 quadruped"],
+    "time_period": "2021",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210704034-rma-rapid-motor-adaptation-for-legged-robots-2"
+  }
+]

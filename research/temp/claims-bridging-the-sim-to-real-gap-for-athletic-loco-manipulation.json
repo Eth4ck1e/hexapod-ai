@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "Athletic loco-manipulation policies for a quadruped+arm system (19 DoF) are trained using Isaac Sim with 4096 parallel environments using PPO (RSL-RL), but total step counts and wall-clock training times are not reported in the paper.",
+    "stance": "neutral",
+    "stance_target": "Training budget for quadruped loco-manipulation RL",
+    "evidence_type": "empirical",
+    "scope_conditions": "Unitree B2 quadruped + Z1 Pro arm; Isaac Sim; MIT Supercloud HPC cluster",
+    "quoted_support": "we designed the training environment in Isaac Sim with 4096 parallel environments. We train policies with the RSL-RL implementation of PPO with default hyperparameters",
+    "numbers": ["4096 parallel environments", "Horizon=24 steps (pre-train)", "Horizon=96 steps (UAN)"],
+    "entities": ["MIT Improbable AI Lab", "Unitree B2", "Unitree Z1 Pro", "Isaac Sim", "RSL-RL", "PPO", "MIT Supercloud"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "bridging-the-sim-to-real-gap-for-athletic-loco-manipulation"
+  },
+  {
+    "claim": "A two-stage WBC pre-training + task-specific RL fine-tuning pipeline substantially outperforms both training from scratch and a frozen-WBC high-level policy approach for athletic loco-manipulation.",
+    "stance": "supports",
+    "stance_target": "Pre-train then fine-tune is the dominant paradigm for complex legged robot learning",
+    "evidence_type": "empirical",
+    "scope_conditions": "Athletic tasks: throwing, lifting, sled-pulling; quadruped manipulator platform",
+    "quoted_support": "End-to-end fine-tuning from a pre-trained WBC leads to the best task performance.",
+    "numbers": ["4096 environments", "4 actor mini-batches per epoch"],
+    "entities": ["WBC", "UAN", "Unitree B2", "MIT Improbable AI Lab"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "bridging-the-sim-to-real-gap-for-athletic-loco-manipulation"
+  },
+  {
+    "claim": "A single pre-trained WBC can serve as initialization for multiple task-specific fine-tuning runs (throw, lift, sled-pull), avoiding repeated pre-training and reducing total compute.",
+    "stance": "supports",
+    "stance_target": "Shared pre-training amortizes compute cost across multiple task fine-tunes",
+    "evidence_type": "empirical",
+    "scope_conditions": "Three athletic tasks tested; quadruped manipulator; Isaac Sim PPO training",
+    "quoted_support": "The same WBC base policy weights can be reused for multiple task policies, thus avoiding repeated pre-training.",
+    "numbers": ["3 athletic tasks (throw, lift, sled-pull)", "4096 parallel environments"],
+    "entities": ["WBC", "MIT Improbable AI Lab", "Unitree B2"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "bridging-the-sim-to-real-gap-for-athletic-loco-manipulation"
+  },
+  {
+    "claim": "The Unsupervised Actuator Net (UAN) is trained from approximately 5 minutes of real hardware data using RL to predict corrective torques, providing a data-efficient alternative to torque-sensor-based actuator networks.",
+    "stance": "supports",
+    "stance_target": "Actuator calibration via small real-world datasets enables effective sim-to-real transfer",
+    "evidence_type": "empirical",
+    "scope_conditions": "Unitree Z1 Pro arm with harmonic drive actuators; no torque sensors; RL-based UAN training",
+    "quoted_support": "We collect data on the real hardware to construct a dataset of transitions... for about 5 minutes.",
+    "numbers": ["~5 minutes real hardware data", "128x128 2-layer MLP UAN architecture", "5 ms simulation timestep"],
+    "entities": ["UAN", "Unitree Z1 Pro", "MIT Improbable AI Lab"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "bridging-the-sim-to-real-gap-for-athletic-loco-manipulation"
+  },
+  {
+    "claim": "Reward hacking in task-reward-only training can be mitigated by accurate actuator modeling (UAN) rather than penalty enumeration, since the policy cannot exploit simulator imperfections that no longer exist.",
+    "stance": "supports",
+    "stance_target": "Accurate simulation reduces reward hacking better than adding more penalty terms",
+    "evidence_type": "empirical",
+    "scope_conditions": "Athletic whole-body loco-manipulation; task-only reward (no dense tracking); quadruped+arm",
+    "quoted_support": "UAN mitigates reward hacking by ensuring that the learned behaviors remain robust and transferable.",
+    "numbers": [],
+    "entities": ["UAN", "MIT Improbable AI Lab", "Unitree B2"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "bridging-the-sim-to-real-gap-for-athletic-loco-manipulation"
+  }
+]

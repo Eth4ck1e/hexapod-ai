@@ -1,0 +1,7 @@
+{
+  "applied": [
+    {"category": "readability", "description": "split overlong opening sentence in section 1 into two sentences and removed first-person 'we surveyed'", "chars_removed": 8},
+    {"category": "hedge", "description": "replaced 'suggests that ... is likely to produce' hedges with committed phrasing in section 6.5 (binding constraint and AMP-vs-PPO claims)", "chars_removed": 18}
+  ],
+  "escalations": []
+}

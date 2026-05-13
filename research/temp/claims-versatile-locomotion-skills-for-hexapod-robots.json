@@ -1,0 +1,58 @@
+[
+  {
+    "claim": "Berkeley/DeepMind hexapod teacher policy training takes approximately 10 hours on an RTX TITAN GPU in IsaacGym, with student distillation taking an additional ~5 hours.",
+    "stance": "supports",
+    "stance_target": "hexapod skill learning requires 10-15 hours of total compute on a single high-end GPU",
+    "evidence_type": "empirical",
+    "scope_conditions": "SpiderPi hexapod, IsaacGym, RTX TITAN GPU, teacher-student framework, 3 separate skill policies",
+    "quoted_support": "The entire training process takes approximately 10 hours for the teacher policy and 5 hours for the student policy on an RTX TITAN GPU.",
+    "numbers": ["10 hours (teacher RL)", "5 hours (student distillation)", "RTX TITAN GPU"],
+    "entities": ["Berkeley EECS", "Google DeepMind", "IsaacGym", "RTX TITAN", "SpiderPi"],
+    "time_period": "2024",
+    "region": "USA (UC Berkeley)",
+    "confidence": "high",
+    "source_note_id": "versatile-locomotion-skills-for-hexapod-robots"
+  },
+  {
+    "claim": "The Berkeley hexapod paper uses a two-stage (teacher RL + student supervised distillation) training pipeline, decomposing the budget into a Phase 1 RL stage and a Phase 2 BC-distillation stage.",
+    "stance": "supports",
+    "stance_target": "teacher-student decomposition is common in hexapod/legged locomotion training budgets",
+    "evidence_type": "empirical",
+    "scope_conditions": "Hexapod with depth camera + VIO, no real-time joint feedback",
+    "quoted_support": "we use a two-stage teacher-student training procedure to learn models that can work without real-time [joint feedback]... In phase 1, we use reinforcement learning with access to privileged information such as height maps and joint feedback. In phase 2, we use supervised learning to distill the model",
+    "numbers": ["Phase 1: ~10 hours RL", "Phase 2: ~5 hours distillation"],
+    "entities": ["IsaacGym", "SpiderPi"],
+    "time_period": "2024",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "versatile-locomotion-skills-for-hexapod-robots"
+  },
+  {
+    "claim": "Total step count for the Berkeley hexapod paper is not explicitly reported; only wall-clock hours are given.",
+    "stance": "neutral",
+    "stance_target": "training step budget in Berkeley hexapod paper",
+    "evidence_type": "empirical",
+    "scope_conditions": "Paper reports wall-clock time (10h + 5h) but not num_envs x steps breakdown",
+    "quoted_support": "Different tasks require different number of training iterations to converge, as seen in the reward convergence curve shown in Figure",
+    "numbers": ["10 hours (teacher)", "5 hours (student)"],
+    "entities": [],
+    "time_period": "2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "versatile-locomotion-skills-for-hexapod-robots"
+  },
+  {
+    "claim": "The Berkeley hexapod paper employs curriculum training for all skills (stair climbing, obstacle avoidance, squeezing), gradually increasing difficulty.",
+    "stance": "supports",
+    "stance_target": "curriculum training is standard practice in legged robot skill learning",
+    "evidence_type": "empirical",
+    "scope_conditions": "IsaacGym, hexapod, 3 distinct tasks each with their own curriculum",
+    "quoted_support": "We deployed curriculum training in order to help the robot climb more challenging staircases by first learning easier ones. In particular, we let the riser heights increase from 4.5 cm to 18 cm and the tread depth decrease from 30 cm to 18 cm",
+    "numbers": ["4.5 cm to 18 cm riser height range"],
+    "entities": [],
+    "time_period": "2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "versatile-locomotion-skills-for-hexapod-robots"
+  }
+]

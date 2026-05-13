@@ -1,0 +1,9 @@
+{
+  "total_recommendations": 5,
+  "applied": ["rec-1", "rec-2", "rec-3", "rec-4"],
+  "skipped": [
+    {"id": "rec-5", "reason": "Cosmetic extra blank line before H2 adds no readability gain; H2 already has standard whitespace."}
+  ],
+  "edit_failures": [],
+  "net_char_delta_actual": -3
+}

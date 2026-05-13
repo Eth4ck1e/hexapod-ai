@@ -1,0 +1,44 @@
+[
+  {
+    "claim": "Rudin et al. train ANYmal in under 20 minutes for rough terrain using 4096 parallel robots, batch size 98,304, and 1500 policy updates on a single NVIDIA RTX A6000 GPU.",
+    "stance": "supports",
+    "stance_target": "massively parallel IsaacGym training can achieve real-world quadruped locomotion in under 20 minutes",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped, IsaacGym, RTX A6000, rough terrain curriculum, 4096 parallel robots",
+    "quoted_support": "we use a policy trained with 4096 robots and a batch size of 98304, which we train for 1500 policy updates in under 20 minutes... Trained on: i9-11900k CPU, NVIDIA RTX A6000 GPU.",
+    "numbers": ["4096 robots", "batch_size=98304", "1500 policy updates", "under 20 minutes (rough terrain)", "under 4 minutes (flat terrain)", "RTX A6000"],
+    "entities": ["ANYmal", "ETH Zurich", "NVIDIA", "IsaacGym", "RTX A6000"],
+    "time_period": "2022",
+    "region": "Switzerland / USA",
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen"
+  },
+  {
+    "claim": "The Rudin et al. paper finds that 2048 to 4096 robots is the sweet spot for performance vs. training time, with sharp performance drops above ~4096-8192 robots due to insufficient temporal steps per policy update.",
+    "stance": "supports",
+    "stance_target": "num_envs between 2048-4096 is the practical optimum for IsaacGym-style PPO",
+    "evidence_type": "empirical",
+    "scope_conditions": "On-policy PPO, IsaacGym, single GPU ablation study",
+    "quoted_support": "From the third plot we can conclude that increasing the number of robots is beneficial for both final performance and training time, but there is an upper limit on this number after which an on-policy algorithm cannot learn effectively... we can conclude that using 2048 to 4096 robots with a batch size of [98304]",
+    "numbers": ["2048-4096 robots optimal", "16384 maximum tested", "98304 batch size"],
+    "entities": [],
+    "time_period": "2022",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen"
+  },
+  {
+    "claim": "Previous quadruped RL work required 12-120 hours of training; Rudin et al. reduce this to under 20 minutes — representing multiple orders of magnitude speedup.",
+    "stance": "supports",
+    "stance_target": "massively parallel GPU-based RL dramatically reduces locomotion training time vs. earlier approaches",
+    "evidence_type": "empirical",
+    "scope_conditions": "Comparison to Lee et al. (12 hours), Kumar et al. (82/88 hours), Miki et al. (120 hours)",
+    "quoted_support": "we can train a perceptive policy in under 20 minutes on a single GPU... Perceptive locomotion has been achieved... (12 hours of training)... (82 and 88 hours of training)... (120 hours of training).",
+    "numbers": ["under 20 minutes (Rudin)", "12 hours (Lee et al.)", "82-88 hours (Kumar)", "120 hours (Miki)"],
+    "entities": ["ANYmal", "ETH Zurich"],
+    "time_period": "2022",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen"
+  }
+]

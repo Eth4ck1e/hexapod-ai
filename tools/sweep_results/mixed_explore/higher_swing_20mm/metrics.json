@@ -1,0 +1,25 @@
+{
+  "cfg_id": "higher_swing_20mm",
+  "overrides": {
+    "swing_clearance": 0.02
+  },
+  "status": "Infeasible_Problem_Detected",
+  "success": false,
+  "elapsed_s": 231.2634629998356,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 4.38801687292747,
+    "max_abs_pitch_deg": 0.20143493082197672,
+    "max_abs_roll_deg": 0.1320212886628054,
+    "body_z_dev_max_m": 0.0011347121560223716,
+    "base_y_err_max_mm": 0.7099278836430193,
+    "base_x_err_max_mm": 0.6058873712275759,
+    "mean_vx_actual": 0.17,
+    "mean_vy_actual": 1.4642175092890996e-17,
+    "peak_abs_body_ax_mps2": 1.0685637607140241,
+    "peak_abs_body_ay_mps2": 1.0846483077988966,
+    "joint_std_max": 0.34017330948942426,
+    "joint_std_min": 0.04768085564310497
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\higher_swing_20mm\\result.npz"
+}

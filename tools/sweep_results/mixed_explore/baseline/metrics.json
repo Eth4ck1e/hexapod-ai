@@ -1,0 +1,23 @@
+{
+  "cfg_id": "baseline",
+  "overrides": {},
+  "status": "Solve_Succeeded",
+  "success": true,
+  "elapsed_s": 115.40982239996083,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 3.077736178343002,
+    "max_abs_pitch_deg": 0.07526964356741793,
+    "max_abs_roll_deg": 0.08374839728223533,
+    "body_z_dev_max_m": 0.0012450209838651694,
+    "base_y_err_max_mm": 0.3009045272936364,
+    "base_x_err_max_mm": 0.23160235840197219,
+    "mean_vx_actual": 0.16999999999996393,
+    "mean_vy_actual": 2.1135971429420802e-13,
+    "peak_abs_body_ax_mps2": 0.5915124321157624,
+    "peak_abs_body_ay_mps2": 0.2757532519694542,
+    "joint_std_max": 0.19958218023355784,
+    "joint_std_min": 0.0402409624183715
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\baseline\\result.npz"
+}

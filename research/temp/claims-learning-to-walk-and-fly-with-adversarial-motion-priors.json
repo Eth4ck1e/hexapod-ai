@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "AMP training for aerial humanoid robot (iRonCub) walk-fly transitions required ~2 hours with 4096 parallel agents on NVIDIA Quadro RTX 6000 using Isaac Gym.",
+    "stance": "supports",
+    "stance_target": "AMP training wall-clock time for legged locomotion on high-end professional GPU",
+    "evidence_type": "empirical",
+    "scope_conditions": "iRonCub aerial humanoid, 23 joints, Isaac Gym, flat/terrain scenarios",
+    "quoted_support": "'We trained 4096 agents using PPO, controlled at 60 hz. The training requires ~2 hours on an NVIDIA Quadro RTX 6000.'",
+    "numbers": ["4096 agents", "~2 hours", "NVIDIA Quadro RTX 6000", "60 Hz control frequency"],
+    "entities": ["iRonCub", "Isaac Gym", "NVIDIA Quadro RTX 6000"],
+    "time_period": "2023",
+    "region": "Italy/Switzerland",
+    "confidence": "high",
+    "source_note_id": "learning-to-walk-and-fly-with-adversarial-motion-priors"
+  },
+  {
+    "claim": "PPO mini-batch size of 32768 is used with 4096 parallel agents in AMP walk-fly training.",
+    "stance": "supports",
+    "stance_target": "PPO batch sizes used in massively parallel AMP training",
+    "evidence_type": "empirical",
+    "scope_conditions": "iRonCub walk-fly AMP, Isaac Gym",
+    "quoted_support": "Table I (PPO parameters): 'Mini-batch size: 32768, Number of actors: 4096'",
+    "numbers": ["mini-batch size 32768", "4096 actors", "discount 0.99", "learning rate 5e-5", "clip 0.2", "entropy coefficient 0.0", "KL threshold 0.008"],
+    "entities": ["PPO", "Isaac Gym", "iRonCub"],
+    "time_period": "2023",
+    "region": "Italy/Switzerland",
+    "confidence": "high",
+    "source_note_id": "learning-to-walk-and-fly-with-adversarial-motion-priors"
+  },
+  {
+    "claim": "The walk-fly AMP system uses small motion datasets: walking from CMU human mocap retargeted via IK, flying from trajectory optimization — no explicit clip counts or dataset size in steps stated.",
+    "stance": "supports",
+    "stance_target": "AMP demo dataset source and size for locomotion training",
+    "evidence_type": "empirical",
+    "scope_conditions": "iRonCub walk-fly multimodal locomotion",
+    "quoted_support": "'Walking motions are produced from recorded mocap clip and retargeted to the iRonCub model using inverse kinematics... Trajectory optimization for aerial humanoid robots produces flying motions containing the full state.'",
+    "numbers": [],
+    "entities": ["CMU mocap", "iDynTree", "trajectory optimization"],
+    "time_period": "2023",
+    "region": "Italy/Switzerland",
+    "confidence": "high",
+    "source_note_id": "learning-to-walk-and-fly-with-adversarial-motion-priors"
+  },
+  {
+    "claim": "The AMP walk-fly system trains stable policies (low variance across 10 runs) with ~2 hours on a Quadro RTX 6000, suggesting AMP convergence is fast and robust for this task class.",
+    "stance": "supports",
+    "stance_target": "AMP training stability and convergence speed",
+    "evidence_type": "empirical",
+    "scope_conditions": "iRonCub AMP, Isaac Gym, 10 training runs",
+    "quoted_support": "'The curves show a small variance, demonstrating the stability of the training.'",
+    "numbers": ["10 runs", "small variance"],
+    "entities": ["iRonCub AMP"],
+    "time_period": "2023",
+    "region": "Italy/Switzerland",
+    "confidence": "high",
+    "source_note_id": "learning-to-walk-and-fly-with-adversarial-motion-priors"
+  },
+  {
+    "claim": "No BC pretrain stage, no DR finetune stage breakdown — the walk-fly AMP paper reports a single 2-hour training run as the complete budget.",
+    "stance": "supports",
+    "stance_target": "AMP training pipeline stages for legged locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "iRonCub walk-fly AMP, simulation only",
+    "quoted_support": "Section IV-B: 'The training requires ~2 hours on an NVIDIA Quadro RTX 6000. The training parameters are shown in Tab. I.' No pretrain or finetune stages described.",
+    "numbers": ["~2 hours total"],
+    "entities": ["iRonCub"],
+    "time_period": "2023",
+    "region": "Italy/Switzerland",
+    "confidence": "high",
+    "source_note_id": "learning-to-walk-and-fly-with-adversarial-motion-priors"
+  }
+]

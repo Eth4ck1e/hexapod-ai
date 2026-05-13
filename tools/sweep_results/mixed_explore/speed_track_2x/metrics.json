@@ -1,0 +1,25 @@
+{
+  "cfg_id": "speed_track_2x",
+  "overrides": {
+    "w_speed": 1000.0
+  },
+  "status": "Maximum_Iterations_Exceeded",
+  "success": false,
+  "elapsed_s": 6522.640421499964,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 17.488496364588624,
+    "max_abs_pitch_deg": 0.025838358793687257,
+    "max_abs_roll_deg": 0.01173286197849633,
+    "body_z_dev_max_m": 0.0011450991703185198,
+    "base_y_err_max_mm": 0.01855187354754561,
+    "base_x_err_max_mm": 0.050675040048686615,
+    "mean_vx_actual": 0.17000000001553933,
+    "mean_vy_actual": -4.205012221159375e-12,
+    "peak_abs_body_ax_mps2": 0.11078754262210433,
+    "peak_abs_body_ay_mps2": 0.028327518034543295,
+    "joint_std_max": 0.2761255350830897,
+    "joint_std_min": 0.03478568429896312
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\speed_track_2x\\result.npz"
+}

@@ -36,8 +36,8 @@ Cmd vector (matches gait.Controller — physical units):
                                               matches what _body_pitch_roll computes)
   [5] height_delta m       stance height delta (- = body raised)
   [6] width_delta  m       stance width delta (+ = wider)
-  [7] shift_x      m       body shift in body +X    (RESERVED — task #8)
-  [8] shift_y      m       body shift in body +Y    (RESERVED — task #8)
+  [7] shift_x      m       body shift in body +X (planted feet stay put)
+  [8] shift_y      m       body shift in body +Y (planted feet stay put)
 
 Curriculum stages — controlled by `stage` arg at construction. Each stage
 unlocks a subset of cmd slots; locked slots are sampled as 0.
@@ -90,13 +90,13 @@ STAGE_CMD_MASK = {
     # commanded skills builds on the discipline already learned here.
     1: np.array([1, 1, 0, 0, 0, 0, 0, 0, 0]),
     2: np.array([1, 1, 1, 0, 0, 1, 1, 0, 0]),
-    # Stage 3: all motion EXCEPT shift_x / shift_y. The gait controller has
-    # no programmed body-shift overlay (slots 7, 8 are reserved for task #8
-    # but unimplemented), so commanding them produces no scaffold response
-    # and provides no meaningful BC/RL signal. Sampling them just adds noise
-    # to the cmd-vector portion of the obs.
-    3: np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
-    4: np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+    # Stage 3: full motion including body shift (shift_x, shift_y). The
+    # gait controller now applies the shift overlay (task #8 done) so
+    # commanding them produces a real scaffold response and provides BC/RL
+    # signal. Stays off in stage 4 only if a future curriculum step wants
+    # to defer it.
+    3: np.array([1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    4: np.array([1, 1, 1, 1, 1, 1, 1, 1, 1]),
 }
 
 # Cmd slots whose tracking actually matters for reward. Width and shifts are
@@ -259,10 +259,26 @@ class HexapodEnv(gym.Env):
         8: (-0.030, 0.030),
     }
 
-    def __init__(self, render_mode=None, stage=1, live_watch=False):
+    def __init__(self, render_mode=None, stage=1, live_watch=False, model_path=None):
         super().__init__()
         self.render_mode = render_mode
         self.stage       = stage
+        # Optional override of the MJCF file. Defaults to the project's main
+        # mesh-based model (MODEL_PATH constant). Pass `model_path=...` to
+        # use a different MJCF (e.g. the primitive-geom phantomx_simple.xml
+        # for MJX validation runs) without permanently editing the constant.
+        # Path can be absolute or relative to this env file's directory.
+        if model_path is None:
+            self._model_path = MODEL_PATH
+        elif os.path.isabs(model_path):
+            self._model_path = model_path
+        else:
+            # Relative paths anchor to either the env file's directory (e.g.
+            # "../models/phantomx.xml") or the cwd (e.g. "models/...").
+            # Pick whichever resolves to an existing file; fall back to cwd.
+            env_relative = os.path.join(os.path.dirname(__file__), model_path)
+            self._model_path = (env_relative if os.path.exists(env_relative)
+                                else model_path)
         # Side-channel live-state mirror via shared memory. When True, this env
         # writes its qpos+qvel to a named shared memory region every step. A
         # separate `mjpython live_viewer.py` process reads it and renders. We
@@ -274,12 +290,12 @@ class HexapodEnv(gym.Env):
         self._live_buf   = None
 
         # Mujoco
-        self._model = mujoco.MjModel.from_xml_path(MODEL_PATH)
+        self._model = mujoco.MjModel.from_xml_path(self._model_path)
         self._data  = mujoco.MjData(self._model)
         self._dt    = float(self._model.opt.timestep)
 
         # Gait controller — the analytical scaffold.
-        self._ctrl = Controller(MODEL_PATH)
+        self._ctrl = Controller(self._model_path)
 
         # Per-slot tracking error scales. Normalizes errors so that a "full
         # deviation" on any slot contributes roughly 1.0 to the error norm
@@ -315,12 +331,10 @@ class HexapodEnv(gym.Env):
         # Scratch buffer for mj_objectVelocity (avoid allocation per step).
         self._vel6_scratch = np.zeros(6, dtype=np.float64)
 
-        # Spaces. Obs layout (78 dim, see _get_obs):
-        #   joint_pos(18) + joint_vel(18) + imu_quat(4) + imu_gyro(3) + imu_accel(3)
-        #   + scaffold_hint(18, foot positions in body frame)
-        #   + gait_phase(2) + cmd(9) + body_linvel(3)
-        obs_dim = 18 + 18 + 4 + 3 + 3 + 18 + 2 + self.CMD_DIM + 3
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32)
+        # Obs layout is owned by envs/obs_layout.py — single source of truth
+        # shared with hexapod_env_jax.py so layout changes can't drift apart.
+        from envs.obs_layout import OBS_DIM
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(OBS_DIM,), dtype=np.float32)
         self.action_space      = spaces.Box(-1.0, 1.0, shape=(self.ACTION_DIM,), dtype=np.float32)
 
         # Episode-mutable state.
@@ -787,38 +801,39 @@ class HexapodEnv(gym.Env):
     # Observation
     # ------------------------------------------------------------------
     def _get_obs(self):
+        """Build the policy's obs via the shared envs.obs_layout module so
+        the gym env and the JAX env always emit byte-identical layouts. We
+        use JAX-convention raw signals (qpos-based quat, qvel-based gyro,
+        zero accel) because training happens in the JAX env — the gym env
+        only exists for watch / eval / record, and must produce the same
+        obs distribution the policy was trained against.
+        """
+        from envs.obs_layout import compose_obs
         qpos = self._data.qpos
         qvel = self._data.qvel
-        sd   = self._data.sensordata
-        imu_quat  = sd[self._quat_adr : self._quat_adr + 4]
-        imu_gyro  = sd[self._gyro_adr : self._gyro_adr + 3]
-        imu_accel = sd[self._acc_adr  : self._acc_adr  + 3]
-
-        # Scaffold hint: where the analytical gait wants each foot, in body frame.
-        # Pulled from the cache populated in step() — same value compute_foot_targets
-        # would return for this (cmd, sim_time), without running the gait pipeline twice.
-        scaffold_hint = self._latest_feet_body.flatten()   # (6, 3) → (18,)
-
+        scaffold_hint = self._latest_feet_body.flatten()
         phase = self._ctrl.get_phase(self._sim_time)
         body_linvel = np.asarray(self._body_frame_linvel(), dtype=np.float32)
-
-        # Stage 4: drop privileged body_linvel. Implement as zero-out for now;
-        # noise injection / IMU-only estimation is a later refinement.
+        # Stage 4: drop privileged body_linvel. Later refinement may
+        # inject IMU-only estimation noise instead.
         if self.stage == 4:
             body_linvel = np.zeros(3, dtype=np.float32)
-
-        return np.concatenate([
-            qpos[7:],                              # joint positions     (18)
-            qvel[6:],                              # joint velocities    (18)
-            imu_quat,                              # body quaternion     ( 4)
-            imu_gyro,                              # body angular vel    ( 3)
-            imu_accel,                             # body linear accel   ( 3)
-            scaffold_hint,                         # foot-target hint    (18)
-            [math.sin(2 * math.pi * phase),
-             math.cos(2 * math.pi * phase)],      # gait phase           ( 2)
-            self._cmd,                             # cmd vector          ( 9)
-            body_linvel,                           # body linvel         ( 3)
-        ]).astype(np.float32)
+        return compose_obs(
+            joint_pos       = qpos[7:25],
+            joint_vel       = qvel[6:24],
+            imu_quat        = qpos[3:7],                       # JAX convention
+            imu_gyro        = qvel[3:6],                       # JAX convention
+            imu_accel       = np.zeros(3, dtype=np.float32),   # JAX convention
+            scaffold_hint   = scaffold_hint,
+            phase_sc        = np.array([math.sin(2 * math.pi * phase),
+                                        math.cos(2 * math.pi * phase)],
+                                       dtype=np.float32),
+            cmd             = self._cmd,
+            body_linvel     = body_linvel,
+            joint_torque    = self._data.qfrc_actuator[6:24].astype(np.float32),
+            joint_pos_error = (self._data.ctrl[:18] - qpos[7:25]).astype(np.float32),
+            concat_fn       = np.concatenate,
+        ).astype(np.float32)
 
     # ------------------------------------------------------------------
     # Render

@@ -1,0 +1,25 @@
+{
+  "cfg_id": "tighter_sym_3x",
+  "overrides": {
+    "w_sym": 30000.0
+  },
+  "status": "StepError_NearFeasible",
+  "success": true,
+  "elapsed_s": 356.4204730000347,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 4.725482806995674,
+    "max_abs_pitch_deg": 0.34730407819111103,
+    "max_abs_roll_deg": 0.2715863146541433,
+    "body_z_dev_max_m": 0.0036351932528884134,
+    "base_y_err_max_mm": 0.2624126126147523,
+    "base_x_err_max_mm": 0.32010081136141927,
+    "mean_vx_actual": 0.17,
+    "mean_vy_actual": -1.2283911600363735e-20,
+    "peak_abs_body_ax_mps2": 0.20590350363201665,
+    "peak_abs_body_ay_mps2": 0.33963266819991295,
+    "joint_std_max": 0.2334913468170724,
+    "joint_std_min": 0.03285065862481456
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\tighter_sym_3x\\result.npz"
+}

@@ -21,14 +21,17 @@ Cmd vector (9 floats, all physical units):
                               [Euler convention; matches env's _body_pitch_roll]
     [5] height_delta m       stance height delta (- = body raised)
     [6] width_delta  m       stance width delta (+ = wider)
-    [7] shift_x      m       body shift in body +X    (RESERVED — task #8)
-    [8] shift_y      m       body shift in body +Y    (RESERVED — task #8)
+    [7] shift_x      m       body shift in body +X (planted feet stay put)
+    [8] shift_y      m       body shift in body +Y (planted feet stay put)
 
 Pipeline per call:
     1. Stance overlay  (cmd[5], cmd[6])  → modifies coxa-local rest position.
     2. Tilt overlay    (cmd[3], cmd[4])  → rotates each foot's body-frame
        position by R⁻¹ so feet stay planted while body rotates around them.
-    3. Body shift      (cmd[7], cmd[8])  → reserved, not yet applied.
+    3. Body shift      (cmd[7], cmd[8])  → translates body in body frame;
+                                           planted feet stay in world frame
+                                           by shifting their coxa-local
+                                           targets by the inverse delta.
     4. Translation     (cmd[0], cmd[1])  → precomputed coxa-local path delta
                                            (xy), rotated by heading, scaled
                                            by stride_scale = |v|/MAX_SPEED.
@@ -189,14 +192,66 @@ class Controller:
                                        this for env settle / reset)
     """
 
-    DEFAULT_GAIT_PERIOD     = 1.5
-    DEFAULT_PATH_RADIUS     = 0.025
+    # 2026-05-08 (v8 prep): defaults tuned for hardware-realistic speed.
+    #   path_radius is held SMALL (≤ 40 mm) — large radii produce kinematic
+    #     singularities, asymmetric leg loading, and visible body sway.
+    #   gait_period does the speed work — it's bounded only by AX-12A joint
+    #     velocity (max practical ~3 rad/s under load).
+    # 4 × 0.040 / 0.45 = 0.356 m/s ≈ 0.9 × theoretical hardware max (0.40 m/s).
+    # See docs/MAX_SPEED_ANALYSIS.md for the servo-velocity derivation.
+    DEFAULT_GAIT_PERIOD     = 0.45
+    DEFAULT_PATH_RADIUS     = 0.040
     DEFAULT_PATH_RES        = 100
     DEFAULT_STANCE_WIDTH    = 0.015     # +15 mm outward per foot at neutral
 
+    # Turning-radius operational range for arc-aware turn-while-walking. When
+    # both speed and wz are non-zero, the implied turn radius R = speed / |wz|
+    # is checked against this range:
+    #   R < MIN_TURN_RADIUS  → fall back to pure spin (essentially in-place rotation)
+    #   R > MAX_TURN_RADIUS  → fall back to pure translate (essentially straight)
+    #   in range             → arc-aware path generation around the turn center
+    # Bounds shifted up after visual review: at MIN=0.135m the turn center
+    # was inside the body footprint and inner legs (LM/RM at ±177mm laterally)
+    # were trying to orbit a point right next to them, causing legs to converge
+    # near body center. New MIN=0.250m puts the turn center safely outside the
+    # body envelope. MAX shifted up by the same amount to preserve range width.
+    MIN_TURN_RADIUS         = 0.350    # m, ~1.3× body length (was 0.250)
+    MAX_TURN_RADIUS         = 0.755    # m, ~2.8× body length (was 0.655)
+
+    # Calibrated speed ladder. Each level maps to a (gait_period, path_radius)
+    # tuple that delivers the listed actual velocity in physics simulation
+    # under ±1.5 N·m motor torque. Source: tools/scaffold_speed_calibration.csv
+    # (49-combo sweep run 2026-05-07). Slip is 2-4 mm per stance at all levels;
+    # levels ≥ 2.5 begin to saturate motor torque.
+    SPEED_LEVELS = {
+        0.5: {"gait_period": 1.50, "path_radius": 0.020},   # ~0.050 m/s
+        1.0: {"gait_period": 1.50, "path_radius": 0.030},   # ~0.077 m/s
+        1.5: {"gait_period": 1.50, "path_radius": 0.040},   # ~0.103 m/s
+        2.0: {"gait_period": 1.20, "path_radius": 0.040},   # ~0.128 m/s
+        2.5: {"gait_period": 1.00, "path_radius": 0.050},   # ~0.190 m/s
+        3.0: {"gait_period": 0.85, "path_radius": 0.060},   # ~0.261 m/s
+        3.5: {"gait_period": 0.75, "path_radius": 0.070},   # ~0.362 m/s
+    }
+
     def __init__(self, model_path,
+                 speed_level=None,
                  gait_period=None, path_radius=None, path_res=None,
                  default_stance_width=None):
+        # speed_level resolves to (gait_period, path_radius) via SPEED_LEVELS.
+        # Mutually exclusive with explicit gait_period / path_radius — pick one.
+        if speed_level is not None:
+            if gait_period is not None or path_radius is not None:
+                raise ValueError(
+                    "speed_level is mutually exclusive with gait_period and "
+                    "path_radius — pick one or the other, not both.")
+            if speed_level not in self.SPEED_LEVELS:
+                raise ValueError(
+                    f"speed_level {speed_level} not in calibrated set "
+                    f"{sorted(self.SPEED_LEVELS.keys())}")
+            level_cfg     = self.SPEED_LEVELS[speed_level]
+            gait_period   = level_cfg["gait_period"]
+            path_radius   = level_cfg["path_radius"]
+        self.speed_level          = speed_level   # None if explicit/default
         self.model_path           = model_path
         self.gait_period          = gait_period          or self.DEFAULT_GAIT_PERIOD
         self.path_radius          = path_radius          or self.DEFAULT_PATH_RADIUS
@@ -253,25 +308,60 @@ class Controller:
         # Set joints to NEUTRAL_POSE and run FK so geom positions are valid.
         self._set_pose(model, data, NEUTRAL_POSE)
 
-        # Foot tip via lowest-world-Z mesh vertex of each tibia at NEUTRAL_POSE.
-        # All six tibias share the same mesh.
-        mesh_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MESH, "tibia")
-        v0 = model.mesh_vertadr[mesh_id]; vn = model.mesh_vertnum[mesh_id]
-        mesh_verts = model.mesh_vert[v0:v0+vn].copy()
+        # Foot tip detection: two paths depending on whether the model uses a
+        # mesh tibia (legacy phantomx.xml) or primitive geoms (phantomx_simple.xml).
+        #   * Mesh path: find lowest-world-Z vertex of the tibia mesh at
+        #     NEUTRAL_POSE — empirical, picks up whatever the mesh says.
+        #   * Primitive path: look up the named foot_<LEG> geom and read its
+        #     `geom_pos` (tibia-local position). Direct, exact, no search.
+        # The primitive path is preferred — it's cheaper and produces an
+        # exact result rather than an empirical approximation.
+        tibia_mesh_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MESH, "tibia")
+        use_primitive_foot = (tibia_mesh_id < 0)
 
         self.FOOT_TIP_LOCAL  = np.zeros((6, 3))
         self.LEG_ORIGIN_BODY = np.zeros((6, 3))
-        for i, n in enumerate(LEG_NAMES):
-            tg = self._find_tibia_geom(model, n)
-            gp = data.geom_xpos[tg]
-            gm = data.geom_xmat[tg].reshape(3, 3)
-            world_verts = (gm @ mesh_verts.T).T + gp
-            low = world_verts[np.argmin(world_verts[:, 2])]
 
-            tp = data.xpos[tibia_bid[i]]
-            tm = data.xmat[tibia_bid[i]].reshape(3, 3)
-            self.FOOT_TIP_LOCAL[i]  = tm.T @ (low - tp)
-            self.LEG_ORIGIN_BODY[i] = low                # body == world here
+        if use_primitive_foot:
+            for i, n in enumerate(LEG_NAMES):
+                foot_gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"foot_{n}")
+                if foot_gid < 0:
+                    raise RuntimeError(
+                        f"Model has no tibia mesh AND no 'foot_{n}' geom. "
+                        f"Add either a mesh tibia or a named primitive foot geom."
+                    )
+                # geom_pos is the geom origin in its parent body's local frame —
+                # for our foot spheres, that's tibia-local coordinates directly.
+                self.FOOT_TIP_LOCAL[i] = model.geom_pos[foot_gid].copy()
+                # Body-frame foot rest = tibia world pos + rotation @ tibia-local foot tip.
+                tp = data.xpos[tibia_bid[i]]
+                tm = data.xmat[tibia_bid[i]].reshape(3, 3)
+                self.LEG_ORIGIN_BODY[i] = tp + tm @ self.FOOT_TIP_LOCAL[i]
+        else:
+            # Mesh path — empirical lowest-Z vertex search.
+            v0 = model.mesh_vertadr[tibia_mesh_id]
+            vn = model.mesh_vertnum[tibia_mesh_id]
+            mesh_verts = model.mesh_vert[v0:v0+vn].copy()
+            for i, n in enumerate(LEG_NAMES):
+                tg = self._find_tibia_geom(model, n)
+                gp = data.geom_xpos[tg]
+                gm = data.geom_xmat[tg].reshape(3, 3)
+                world_verts = (gm @ mesh_verts.T).T + gp
+                low = world_verts[np.argmin(world_verts[:, 2])]
+                tp = data.xpos[tibia_bid[i]]
+                tm = data.xmat[tibia_bid[i]].reshape(3, 3)
+                self.FOOT_TIP_LOCAL[i]  = tm.T @ (low - tp)
+                self.LEG_ORIGIN_BODY[i] = low                # body == world here
+
+        # Normalize foot z to a common plane (2026-05-10): the MJCF naturally
+        # produces ~3 mm spread between middle legs (-148 mm) and front/rear
+        # (-145 mm) because middle coxas mount slightly lower. The walking
+        # path-mapping math assumes all feet share a z plane, so we set
+        # LEG_ORIGIN_BODY[:, 2] = mean across legs. The IK then resolves
+        # per-leg joint angles to plant each foot at this uniform z. R/L
+        # mirror symmetry is already perfect (verified to micron precision)
+        # so this only equalizes front/middle/rear, not left vs right.
+        self.LEG_ORIGIN_BODY[:, 2] = self.LEG_ORIGIN_BODY[:, 2].mean()
 
         # Per-leg horizontal coxa→foot unit vector (body frame).
         diff_xy = self.LEG_ORIGIN_BODY[:, :2] - COXA_POS_BODY[:, :2]
@@ -466,9 +556,17 @@ class Controller:
         if pitch != 0.0 or roll != 0.0:
             rest = self._apply_tilt(rest, pitch, roll)
 
-        # 3. Body shift overlay — RESERVED (task #8).
-        # if sx != 0.0 or sy != 0.0:
-        #     rest = self._apply_shift(rest, sx, sy)
+        # 3. Body shift overlay. Translates the body by (sx, sy) in body
+        # frame while keeping the planted feet at the same WORLD position —
+        # i.e. the feet appear to move by (-sx, -sy) in body frame. In each
+        # leg's coxa-local frame that body-frame delta becomes
+        #   dx_coxa =  c·(-sx) + s·(-sy)  =  -(c·sx + s·sy)
+        #   dy_coxa = -s·(-sx) + c·(-sy)  =   s·sx - c·sy
+        # where (c, s) = (cos, sin) of the leg's body-frame yaw. Vectorized
+        # below using the cached _yaw_c / _yaw_s arrays. Cheap — pure adds.
+        if sx != 0.0 or sy != 0.0:
+            rest[:, 0] += -(self._yaw_c * sx + self._yaw_s * sy)
+            rest[:, 1] +=  (self._yaw_s * sx - self._yaw_c * sy)
 
         # 4. Speed scales for translation, spin, and lift.
         speed        = math.hypot(vx, vy)
@@ -488,15 +586,66 @@ class Controller:
         s_i = (s_global + LEG_PHASE) % 1.0                            # (6,)
         n_idx = (s_i * self.path_res).astype(np.int64) % self.path_res # (6,)
 
+        # Lift + canonical path samples for all 6 legs at once.
+        px_arr, pz_arr = self._canonical_path_batch(s_i)              # (6,) each
+
+        # Determine motion regime: arc-aware or superposition.
+        # Arc mode requires both translation AND rotation, with an implied
+        # turning radius R = speed / |wz| within the operational range.
+        arc_mode = False
+        if speed > 1e-9 and abs(wz) > 1e-9:
+            R = speed / abs(wz)
+            if self.MIN_TURN_RADIUS < R < self.MAX_TURN_RADIUS:
+                arc_mode = True
+
+        if arc_mode:
+            # ARC-AWARE PATH (Iter-7 of scaffold tuning, 2026-05-07):
+            # When the body is moving along a circular arc of radius R around
+            # turn center C, each leg's foot in body frame rotates around C by
+            # the OPPOSITE of the body's rotation (so the foot stays fixed in
+            # world during stance — no slip).
+            #
+            # C_body = perp(heading) · R · sign(wz)
+            #   where perp(h) = (-sin h, cos h) is 90° CCW from heading.
+            #   For wz>0 (CCW turn), C is to the LEFT of motion direction.
+            # Each leg's foot rotates around C by dtheta = wz·T/4·(px/path_radius).
+            # This produces TRUE arc paths instead of the superposition of
+            # linear translation + body-origin spin.
+            sign_wz = math.copysign(1.0, wz)
+            C_body_x = -s_h * R * sign_wz
+            C_body_y =  c_h * R * sign_wz
+            # Express C in each leg's coxa-local frame (broadcast same body
+            # point to all 6 legs; the batch helper rotates each by leg yaw
+            # and translates by leg coxa origin).
+            C_body_arr = np.tile(np.array([C_body_x, C_body_y, 0.0]), (6, 1))
+            C_coxa = self._body_to_coxa_local_batch(C_body_arr)        # (6, 3)
+            cx = C_coxa[:, 0]
+            cy = C_coxa[:, 1]
+            # Angular sweep per phase. The peak |dtheta| = wz·T/4 matches the
+            # body's angular advance over a quarter cycle. This is exactly
+            # what the existing pure-spin code computes (see derivation in
+            # docs); just rotate around C instead of BODY_ORIGIN_COXA.
+            dtheta = wz * self.gait_period / 4.0 * (px_arr / self.path_radius)
+            cs = np.cos(dtheta)
+            ss = np.sin(dtheta)
+            rx = rest[:, 0] - cx
+            ry = rest[:, 1] - cy
+            arc_x = (cx + (cs * rx - ss * ry)) - rest[:, 0]
+            arc_y = (cy + (ss * rx + cs * ry)) - rest[:, 1]
+            feet = np.empty_like(rest)
+            feet[:, 0] = rest[:, 0] + arc_x
+            feet[:, 1] = rest[:, 1] + arc_y
+            feet[:, 2] = rest[:, 2] + pz_arr * gait_active
+            return feet
+
+        # SUPERPOSITION (existing pure-translate, pure-spin, or out-of-range
+        # combined motion that falls back to superposition).
         # Translation contribution: per-leg precomputed coxa-local path xy at
         # heading=0, fancy-indexed by n_idx to pick the active phase per leg,
         # then rotated by heading, then scaled by stride_scale.
         path_xy = self.LEG_PATH_DELTAS[np.arange(6), n_idx]            # (6, 2)
         trans_x = stride_scale * (c_h * path_xy[:, 0] - s_h * path_xy[:, 1])
         trans_y = stride_scale * (s_h * path_xy[:, 0] + c_h * path_xy[:, 1])
-
-        # Lift + spin reference path samples for all 6 legs at once.
-        px_arr, pz_arr = self._canonical_path_batch(s_i)              # (6,) each
 
         # Spin contribution: on-the-fly rotation around body-origin-in-coxa
         # for each leg, scaled by spin_scale * px / SPIN_REF_RADIUS.

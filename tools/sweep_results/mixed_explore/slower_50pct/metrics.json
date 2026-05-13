@@ -1,0 +1,26 @@
+{
+  "cfg_id": "slower_50pct",
+  "overrides": {
+    "vx": 0.085,
+    "duration_s": 8.0
+  },
+  "status": "Failed: Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:\n.../casadi/core/optistack_internal.cpp:1338: Asser",
+  "success": false,
+  "elapsed_s": 2093.565897199791,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 59.91778920304168,
+    "max_abs_pitch_deg": 0.4482927323354799,
+    "max_abs_roll_deg": 0.44398079738268653,
+    "body_z_dev_max_m": 0.004496050926512146,
+    "base_y_err_max_mm": 0.8944245326420622,
+    "base_x_err_max_mm": 0.8899604235084041,
+    "mean_vx_actual": 0.08499998661330703,
+    "mean_vy_actual": 1.2066503580548547e-08,
+    "peak_abs_body_ax_mps2": 0.7598159295080823,
+    "peak_abs_body_ay_mps2": 1.4973480642436043,
+    "joint_std_max": 0.4559722497154967,
+    "joint_std_min": 0.03907074369011268
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\slower_50pct\\result.npz"
+}

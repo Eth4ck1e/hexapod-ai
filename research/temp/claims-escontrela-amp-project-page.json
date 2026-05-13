@@ -1,0 +1,30 @@
+[
+  {
+    "claim": "AMP style reward can be learned from a few seconds of motion capture data (German Shepherd) and produces energy-efficient locomotion with natural gait transitions on real quadrupedal hardware.",
+    "stance": "supports",
+    "stance_target": "Minimal AMP demo dataset sufficiency for locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "Quadrupedal robot, sim-to-real transfer, IROS 2022 best paper finalist",
+    "quoted_support": "'an effective style reward can be learned from a few seconds of motion capture data gathered from a German Shepherd and leads to energy-efficient locomotion strategies with natural gait transitions'",
+    "numbers": ["few seconds of mocap data"],
+    "entities": ["AMP", "quadruped robot", "German Shepherd mocap"],
+    "time_period": "2022",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "adversarial-motion-priors-make-good-substitutes-for-complex-reward-functions-ale"
+  },
+  {
+    "claim": "Training budget for Escontrela et al. AMP quadruped is not reported on the project page — the paper PDF must be consulted for num_envs, step counts, wall-clock, and GPU details.",
+    "stance": "neutral",
+    "stance_target": "Escontrela 2022 training budget data availability",
+    "evidence_type": "empirical",
+    "scope_conditions": "AMP for real quadruped, IROS 2022",
+    "quoted_support": "Project page contains only qualitative description and video demonstrations; no training configuration table or step budget is presented.",
+    "numbers": [],
+    "entities": ["Escontrela", "AMP"],
+    "time_period": "2022",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "adversarial-motion-priors-make-good-substitutes-for-complex-reward-functions-ale"
+  }
+]

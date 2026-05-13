@@ -1,0 +1,25 @@
+{
+  "cfg_id": "low_body_125mm",
+  "overrides": {
+    "body_height": 0.125
+  },
+  "status": "Failed: Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:\n.../casadi/core/optistack_internal.cpp:1338: Asser",
+  "success": false,
+  "elapsed_s": 2642.6539976000786,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 68.67941647484066,
+    "max_abs_pitch_deg": 0.34747881313114415,
+    "max_abs_roll_deg": 0.25959750910191515,
+    "body_z_dev_max_m": 0.023940246695472747,
+    "base_y_err_max_mm": 0.5746527875077541,
+    "base_x_err_max_mm": 0.49576627197689405,
+    "mean_vx_actual": 0.1700000000015687,
+    "mean_vy_actual": 3.3291417343879866e-13,
+    "peak_abs_body_ax_mps2": 0.9328643785354402,
+    "peak_abs_body_ay_mps2": 1.0500167820660038,
+    "joint_std_max": 0.3074168202547835,
+    "joint_std_min": 0.03799435819048497
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\low_body_125mm\\result.npz"
+}

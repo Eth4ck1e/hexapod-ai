@@ -1,0 +1,30 @@
+[
+  {
+    "claim": "Training real-world humanoid locomotion with PPO requires 4 A100 GPUs and thousands of parallel randomized environments in Isaac Gym; exact step counts are not reported in the main paper (relegated to supplement).",
+    "stance": "neutral",
+    "stance_target": "Training budget for bipedal humanoid locomotion with PPO",
+    "evidence_type": "empirical",
+    "scope_conditions": "Agility Robotics Digit humanoid (30 DoF, 45 kg); Isaac Gym; PPO; teacher-student architecture",
+    "quoted_support": "We leverage fast GPU simulation powered by Isaac Gym and parallelize training across four A100 GPUs and thousands of randomized environments.",
+    "numbers": ["4 A100 GPUs", "thousands of randomized environments", "50 Hz policy frequency", "1 kHz PD controller frequency"],
+    "entities": ["Radosavovic", "UC Berkeley", "Agility Robotics", "Digit", "Isaac Gym", "A100", "PPO"],
+    "time_period": "2023",
+    "region": "Global",
+    "confidence": "medium",
+    "source_note_id": "real-world-humanoid-locomotion-with-reinforcement-learning"
+  },
+  {
+    "claim": "A two-step teacher-student training pipeline for humanoid locomotion trains a teacher state policy with full state access first, then trains a student observation policy using PPO + imitation loss from the teacher, with the imitation loss annealed to zero at training midpoint.",
+    "stance": "supports",
+    "stance_target": "Teacher-student distillation as the standard method for observation-limited locomotion policies",
+    "evidence_type": "empirical",
+    "scope_conditions": "Digit humanoid bipedal locomotion; Isaac Gym; PPO; zero-shot sim-to-real transfer",
+    "quoted_support": "The weighting factor is gradually annealed to zero over the course of the training process, typically reaching zero at the mid-point of the training horizon, which enables the observation policy to benefit from the teacher early on and learn to surpass it eventually.",
+    "numbers": ["λ annealed to 0 at training midpoint", "16 actuated joint PD setpoints (action space)"],
+    "entities": ["Radosavovic", "UC Berkeley", "Digit", "PPO"],
+    "time_period": "2023",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "real-world-humanoid-locomotion-with-reinforcement-learning"
+  }
+]

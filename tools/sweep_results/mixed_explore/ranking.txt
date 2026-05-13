@@ -1,0 +1,65 @@
+Sweep summary — 8 configs
+============================================================
+
+#1  baseline  score=-4.00
+     status=Solve_Succeeded  elapsed=115.4s
+     overrides: {}
+     peak_joint_vel_radps: 3.0777
+     peak_abs_body_ax_mps2: 0.5915
+     peak_abs_body_ay_mps2: 0.2758
+     max_abs_pitch_deg: 0.0753
+     max_abs_roll_deg: 0.0837
+     body_z_dev_max_m: 0.0012
+     base_x_err_max_mm: 0.2316
+     base_y_err_max_mm: 0.3009
+
+#2  tighter_sym_3x  score=+4.00
+     status=StepError_NearFeasible  elapsed=356.4s
+     overrides: {'w_sym': 30000.0}
+     peak_joint_vel_radps: 4.7255
+     peak_abs_body_ax_mps2: 0.2059
+     peak_abs_body_ay_mps2: 0.3396
+     max_abs_pitch_deg: 0.3473
+     max_abs_roll_deg: 0.2716
+     body_z_dev_max_m: 0.0036
+     base_x_err_max_mm: 0.3201
+     base_y_err_max_mm: 0.2624
+
+#3  higher_swing_20mm  score=+inf
+     status=Infeasible_Problem_Detected  elapsed=231.3s
+     overrides: {'swing_clearance': 0.02}
+     peak_joint_vel_radps: 4.3880
+     peak_abs_body_ax_mps2: 1.0686
+     peak_abs_body_ay_mps2: 1.0846
+     max_abs_pitch_deg: 0.2014
+     max_abs_roll_deg: 0.1320
+     body_z_dev_max_m: 0.0011
+     base_x_err_max_mm: 0.6059
+     base_y_err_max_mm: 0.7099
+
+#4  slower_50pct  score=+inf
+     status=Failed: Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:
+.../casadi/core/optistack_internal.cpp:1338: Asser  elapsed=2093.6s
+     overrides: {'vx': 0.085, 'duration_s': 8.0}
+     peak_joint_vel_radps: 59.9178
+     peak_abs_body_ax_mps2: 0.7598
+     peak_abs_body_ay_mps2: 1.4973
+     max_abs_pitch_deg: 0.4483
+     max_abs_roll_deg: 0.4440
+     body_z_dev_max_m: 0.0045
+     base_x_err_max_mm: 0.8900
+     base_y_err_max_mm: 0.8944
+
+#5  low_body_125mm  score=+inf
+     status=Failed: Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:
+.../casadi/core/optistack_internal.cpp:1338: Asser  elapsed=2642.7s
+     overrides: {'body_height': 0.125}
+     peak_joint_vel_radps: 68.6794
+     peak_abs_body_ax_mps2: 0.9329
+     peak_abs_body_ay_mps2: 1.0500
+     max_abs_pitch_deg: 0.3475
+     max_abs_roll_deg: 0.2596
+     body_z_dev_max_m: 0.0239
+     base_x_err_max_mm: 0.4958
+     base_y_err_max_mm: 0.5747
+

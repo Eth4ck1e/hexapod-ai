@@ -1,0 +1,52 @@
+{
+  "sub_questions": [
+    "What total environment-step budgets are reported in 2023-2026 legged-locomotion RL papers, with priority on hexapod and quadruped work using PPO and/or AMP?",
+    "What is the num_envs × iterations × rollout_length breakdown when reported?",
+    "What wall-clock training hours are reported?",
+    "What hardware (GPU model + count) is used in each paper?",
+    "What sample-efficiency metrics are reported?",
+    "Which papers report convergence at notably less or notably more than the median budget?",
+    "How are budgets distinguished across stages — BC pretrain, main RL run, fine-tune/DR — when reported separately?",
+    "For a single RTX 5060 Ti at ~240k it/s effective throughput, what total-step budget is reasonable to target?",
+    "Is the user's planned 100M-500M steps per session in a multi-session curriculum under-trained, on-trend, or over-trained vs published practice?"
+  ],
+  "entities": [
+    {"name": "Hexapod RL papers", "type": "category", "required_fields": ["paper title", "year", "algorithm", "total_env_steps", "envs_x_iters_x_rollout", "wall_clock_hours", "hardware", "sample_efficiency_metric"]},
+    {"name": "Quadruped RL papers", "type": "category", "required_fields": ["paper title", "year", "algorithm", "total_env_steps", "envs_x_iters_x_rollout", "wall_clock_hours", "hardware", "sample_efficiency_metric"]},
+    {"name": "PPO (Proximal Policy Optimization)", "type": "algorithm", "required_fields": ["typical hyperparameters", "step budgets observed"]},
+    {"name": "AMP (Adversarial Motion Priors)", "type": "algorithm", "required_fields": ["discriminator overhead", "step budgets observed", "extra training cost vs vanilla PPO"]},
+    {"name": "BC pretrain (Stage 0)", "type": "budget_category", "required_fields": ["typical step counts", "demo data sizes"]},
+    {"name": "Main RL run", "type": "budget_category", "required_fields": ["typical step counts", "single-task vs curriculum split"]},
+    {"name": "Fine-tune / Domain Randomization", "type": "budget_category", "required_fields": ["typical step counts on top of main run", "DR ranges if reported"]}
+  ],
+  "required_formats": [
+    "comparison table across surveyed papers (per-paper rows: title, year, algorithm, total_env_steps, envs×iters×rollout, wall-clock hours, hardware, sample-efficiency metric)",
+    "committed recommendation for the user's specific budget question"
+  ],
+  "required_sections": [
+    "comparison table",
+    "stage-decomposed budgets (BC pretrain / main RL / fine-tune-DR)",
+    "sample-efficiency outliers (above/below median)",
+    "recommendation for user's RTX 5060 Ti single-GPU budget at ~240k it/s effective"
+  ],
+  "required_section_headings": [
+    "## 1. Overview — Legged-Locomotion RL Training Budgets, 2023-2026",
+    "## 2. Comparison Table — Per-Paper Budget Extraction",
+    "## 3. Stage-Decomposed Budgets — BC Pretrain, Main RL, Fine-Tune / DR",
+    "## 4. Hardware Context — Single-GPU vs Multi-GPU Norms",
+    "## 5. Sample-Efficiency Outliers — Papers Above and Below the Median",
+    "## 6. Recommendation — Budget Target for a Single RTX 5060 Ti at 240k it/s"
+  ],
+  "time_horizons": ["2023-2026 (paper publication window)"],
+  "time_periods": [],
+  "scope_conditions": [
+    "legged-locomotion only (not other RL domains)",
+    "reinforcement learning (priority on PPO and/or AMP; vanilla PPO and AMP-augmented PPO both in scope)",
+    "priority weighting toward hexapod and quadruped morphology",
+    "biped work acceptable as secondary context but not primary",
+    "exclude pure imitation learning and pure classical control papers"
+  ],
+  "pipeline_tier": "light",
+  "response_format": "structured",
+  "citation_style": "wikilink"
+}

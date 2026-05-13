@@ -1,0 +1,58 @@
+[
+  {
+    "claim": "leggedrobotics/legged_gym base config: num_envs=4096, num_steps_per_env=24 (rollout per iteration), max_iterations=1500. Total steps = 4096 x 24 x 1500 = 147,456,000 (~147M steps).",
+    "stance": "supports",
+    "stance_target": "~147M steps is the canonical legged_gym training budget for rough terrain locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym raw config file; LeggedRobotCfg + LeggedRobotCfgPPO base classes; Isaac Gym backend",
+    "quoted_support": "class env: num_envs = 4096 ... class runner: num_steps_per_env = 24 # per iteration; max_iterations = 1500 # number of policy updates",
+    "numbers": ["num_envs=4096", "num_steps_per_env=24", "max_iterations=1500", "147,456,000 total steps"],
+    "entities": ["legged_gym", "ANYmal", "ETH Zurich", "NVIDIA"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_robot_configpy"
+  },
+  {
+    "claim": "legged_gym PPO defaults: num_learning_epochs=5, num_mini_batches=4, learning_rate=1e-3 (adaptive schedule), desired_kl=0.01, gamma=0.99, lam=0.95 (GAE lambda). Effective mini-batch = 4096 x 24 / 4 = 24,576.",
+    "stance": "neutral",
+    "stance_target": "PPO hyperparameter defaults in legged_gym for quadruped locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym LeggedRobotCfgPPO class",
+    "quoted_support": "class algorithm: num_learning_epochs = 5; num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches; learning_rate = 1.e-3; schedule = 'adaptive'; gamma = 0.99; lam = 0.95; desired_kl = 0.01",
+    "numbers": ["num_learning_epochs=5", "num_mini_batches=4", "learning_rate=1e-3", "desired_kl=0.01", "gamma=0.99", "lam=0.95", "effective_mini_batch=24576"],
+    "entities": ["legged_gym", "PPO"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_robot_configpy"
+  },
+  {
+    "claim": "legged_gym default episode length is 20 seconds; physics dt=5ms, decimation=4 (control at 50Hz). Max episode = 400 control steps. feet_air_time reward is included (gait quality signal).",
+    "stance": "neutral",
+    "stance_target": "episode structure and control frequency in canonical legged_gym setup",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym base config",
+    "quoted_support": "episode_length_s = 20 # episode length in seconds ... dt = 0.005 ... decimation = 4 ... feet_air_time = 1.0",
+    "numbers": ["episode_length_s=20", "dt=0.005s", "decimation=4", "control_rate=50Hz", "max_episode_steps=400"],
+    "entities": ["legged_gym"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_robot_configpy"
+  },
+  {
+    "claim": "ANYmal C flat terrain config overrides max_iterations to 300 (vs 1500 base), reducing total steps to 29.5M for flat-terrain training. Network also shrunk to [128,64,32] (vs [512,256,128] base).",
+    "stance": "supports",
+    "stance_target": "flat terrain locomotion converges much faster (~20x fewer steps) than rough terrain in legged_gym",
+    "evidence_type": "empirical",
+    "scope_conditions": "leggedrobotics/legged_gym AnymalCFlatCfgPPO class override",
+    "quoted_support": "class runner (AnymalCRoughCfgPPO.runner): max_iterations = 300 ... class policy: actor_hidden_dims = [128, 64, 32]; critic_hidden_dims = [128, 64, 32]",
+    "numbers": ["max_iterations=300 (flat)", "max_iterations=1500 (rough, base)", "29,491,200 flat steps", "147,456,000 rough steps"],
+    "entities": ["ANYmal C", "legged_gym"],
+    "time_period": "2021-2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "legged_robot_configpy"
+  }
+]

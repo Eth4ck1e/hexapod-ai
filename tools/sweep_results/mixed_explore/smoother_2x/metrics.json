@@ -1,0 +1,26 @@
+{
+  "cfg_id": "smoother_2x",
+  "overrides": {
+    "w_body_accel": 300.0,
+    "w_joint_jerk": 2.0
+  },
+  "status": "Maximum_Iterations_Exceeded",
+  "success": false,
+  "elapsed_s": 6588.8870600000955,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 20.763911395488275,
+    "max_abs_pitch_deg": 0.4500005732471329,
+    "max_abs_roll_deg": 0.4500005731958804,
+    "body_z_dev_max_m": 0.005890676494549912,
+    "base_y_err_max_mm": 0.9000100027270465,
+    "base_x_err_max_mm": 0.9252856818551258,
+    "mean_vx_actual": 0.16999999999999676,
+    "mean_vy_actual": -1.2038604670470324e-16,
+    "peak_abs_body_ax_mps2": 0.6854263016687202,
+    "peak_abs_body_ay_mps2": 0.8768949018102015,
+    "joint_std_max": 0.3799617801938851,
+    "joint_std_min": 0.03515793885796263
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\smoother_2x\\result.npz"
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "claim": "Escontrela et al. (IROS 2022) demonstrated that AMP style rewards learned from a few seconds of motion capture data (German Shepherd) are sufficient to train a quadrupedal robot policy that transfers to real hardware.",
+    "stance": "supports",
+    "stance_target": "Minimal AMP demo dataset size for legged robot locomotion",
+    "evidence_type": "empirical",
+    "scope_conditions": "Quadrupedal robot, motion capture from German Shepherd, sim-to-real transfer",
+    "quoted_support": "'an effective style reward can be learned from a few seconds of motion capture data gathered from a German Shepherd and leads to energy-efficient locomotion strategies with natural gait transitions.'",
+    "numbers": ["few seconds of mocap data"],
+    "entities": ["AMP", "quadrupedal robot", "German Shepherd"],
+    "time_period": "2022",
+    "region": "USA (Berkeley/Google Brain)",
+    "confidence": "high",
+    "source_note_id": "220315103-adversarial-motion-priors-make-good-substitutes-for-complex-reward-fun"
+  },
+  {
+    "claim": "AMP policies trained from motion capture data exhibit energy efficiency (lower Cost of Transport) compared to policies trained with complex hand-designed reward functions.",
+    "stance": "supports",
+    "stance_target": "AMP energy efficiency advantage over reward engineering",
+    "evidence_type": "empirical",
+    "scope_conditions": "Quadrupedal locomotion, sim-to-real transfer",
+    "quoted_support": "'A policy trained using AMP successfully tracks the desired forward velocity commands while exhibiting a lower COT than competing baselines... The energy efficiency of policies trained with AMP can likely be attributed to the policy extracting energy-efficient motion priors from the reference data.'",
+    "numbers": [],
+    "entities": ["Cost of Transport (COT)", "AMP"],
+    "time_period": "2022",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "adversarial-motion-priors-make-good-substitutes-for-complex-reward-functions-ale"
+  },
+  {
+    "claim": "AMP enables automatic gait transitions (e.g. pacing to canter) when velocity commands jump, analogous to how animals naturally transition gaits for energy efficiency.",
+    "stance": "supports",
+    "stance_target": "AMP naturalistic gait emergence for legged robots",
+    "evidence_type": "empirical",
+    "scope_conditions": "Quadrupedal robot, speed range 1-2 m/s",
+    "quoted_support": "'The robot transitioning from a pacing motion to a canter motion when the desired velocity jumps from 1 m/s to 2 m/s. While pacing is the optimal gait at low speeds, entering a canter motion with a flight phase is a more energy-efficient option at high speeds.'",
+    "numbers": ["1 m/s to 2 m/s velocity transition"],
+    "entities": ["AMP", "pacing gait", "canter gait"],
+    "time_period": "2022",
+    "region": "USA",
+    "confidence": "high",
+    "source_note_id": "adversarial-motion-priors-make-good-substitutes-for-complex-reward-functions-ale"
+  }
+]

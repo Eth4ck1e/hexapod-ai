@@ -8,7 +8,7 @@
     <joint damping="0.3" armature="0.01" frictionloss="0.01"/>
     <geom condim="3" friction="1.5 0.05 0.05"/>
     <position kp="60" kv="2" ctrllimited="true" ctrlrange="-3.14 3.14"
-              forcelimited="true" forcerange="-2.5 2.5"/>
+              forcelimited="true" forcerange="-1.5 1.5"/>
   </default>
 
   <asset>
@@ -34,15 +34,15 @@
       <!-- Right Rear -->
       <body name="coxa_RR" pos="-0.12 -0.06 0" quat="0.382683 0 0 -0.92388">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_RR" axis="0 0 1" range="-2.0 2.0"/>
+        <joint name="coxa_joint_RR" axis="0 0 1" range="-1.3500 1.3500"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_RR" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_RR" axis="0 0 -1" range="-2.5 2.5"/>
+          <joint name="femur_joint_RR" axis="0 0 -1" range="-1.8207 1.8243"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_RR" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_RR" axis="0 0 1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_RR" axis="0 0 1" range="-1.1760 1.3592"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -51,15 +51,15 @@
       <!-- Right Middle -->
       <body name="coxa_RM" pos="0 -0.1 0" quat="0.707107 0 0 -0.707107">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_RM" axis="0 0 1" range="-1.0 1.0"/>
+        <joint name="coxa_joint_RM" axis="0 0 1" range="-0.9000 0.9000"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_RM" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_RM" axis="0 0 -1" range="-2.5 2.5"/>
+          <joint name="femur_joint_RM" axis="0 0 -1" range="-2.0737 2.0753"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_RM" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_RM" axis="0 0 1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_RM" axis="0 0 1" range="-1.1757 1.3592"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -68,15 +68,15 @@
       <!-- Right Front -->
       <body name="coxa_RF" pos="0.12 -0.06 0" quat="0.92388 0 0 -0.382683">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_RF" axis="0 0 1" range="-1.0 1.0"/>
+        <joint name="coxa_joint_RF" axis="0 0 1" range="-0.9000 0.9000"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_RF" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_RF" axis="0 0 -1" range="-2.5 2.5"/>
+          <joint name="femur_joint_RF" axis="0 0 -1" range="-1.8207 1.8243"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_RF" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_RF" axis="0 0 1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_RF" axis="0 0 1" range="-1.1760 1.3592"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -85,15 +85,15 @@
       <!-- Left Rear -->
       <body name="coxa_LR" pos="-0.12 0.06 0" quat="0.382683 0 0 0.92388">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_LR" axis="0 0 1" range="-1.0 1.0"/>
+        <joint name="coxa_joint_LR" axis="0 0 1" range="-1.3500 1.3500"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_LR" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_LR" axis="0 0 1" range="-2.5 2.5"/>
+          <joint name="femur_joint_LR" axis="0 0 1" range="-1.8243 1.8207"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_LR" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_LR" axis="0 0 -1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_LR" axis="0 0 -1" range="-1.3592 1.1760"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -102,15 +102,15 @@
       <!-- Left Middle -->
       <body name="coxa_LM" pos="0 0.1 0" quat="0.707107 0 0 0.707107">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_LM" axis="0 0 1" range="-1.0 1.0"/>
+        <joint name="coxa_joint_LM" axis="0 0 1" range="-0.9000 0.9000"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_LM" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_LM" axis="0 0 1" range="-2.5 2.5"/>
+          <joint name="femur_joint_LM" axis="0 0 1" range="-2.0753 2.0737"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_LM" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_LM" axis="0 0 -1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_LM" axis="0 0 -1" range="-1.3592 1.1757"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -119,15 +119,15 @@
       <!-- Left Front -->
       <body name="coxa_LF" pos="0.12 0.06 0" quat="0.92388 0 0 0.382683">
         <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
-        <joint name="coxa_joint_LF" axis="0 0 1" range="-1.0 1.0"/>
+        <joint name="coxa_joint_LF" axis="0 0 1" range="-0.9000 0.9000"/>
         <geom type="mesh" mesh="coxa" rgba="0.8 0.3 0.1 1"/>
         <body name="femur_LF" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
           <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
-          <joint name="femur_joint_LF" axis="0 0 1" range="-2.5 2.5"/>
+          <joint name="femur_joint_LF" axis="0 0 1" range="-1.8243 1.8207"/>
           <geom type="mesh" mesh="femur" rgba="0.8 0.3 0.1 1"/>
           <body name="tibia_LF" pos="0 -0.065 0" quat="0 1 0 0">
             <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
-            <joint name="tibia_joint_LF" axis="0 0 -1" range="-1.5 1.5"/>
+            <joint name="tibia_joint_LF" axis="0 0 -1" range="-1.3592 1.1760"/>
             <geom type="mesh" mesh="tibia" rgba="0.8 0.3 0.1 1"/>
           </body>
         </body>
@@ -137,24 +137,24 @@
   </worldbody>
 
   <actuator>
-    <position name="coxa_RR"  joint="coxa_joint_RR"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_RR" joint="femur_joint_RR" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_RR" joint="tibia_joint_RR" ctrlrange="-2.5 2.5"/>
-    <position name="coxa_RM"  joint="coxa_joint_RM"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_RM" joint="femur_joint_RM" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_RM" joint="tibia_joint_RM" ctrlrange="-2.5 2.5"/>
-    <position name="coxa_RF"  joint="coxa_joint_RF"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_RF" joint="femur_joint_RF" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_RF" joint="tibia_joint_RF" ctrlrange="-2.5 2.5"/>
-    <position name="coxa_LR"  joint="coxa_joint_LR"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_LR" joint="femur_joint_LR" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_LR" joint="tibia_joint_LR" ctrlrange="-2.5 2.5"/>
-    <position name="coxa_LM"  joint="coxa_joint_LM"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_LM" joint="femur_joint_LM" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_LM" joint="tibia_joint_LM" ctrlrange="-2.5 2.5"/>
-    <position name="coxa_LF"  joint="coxa_joint_LF"  ctrlrange="-2.0 2.0"/>
-    <position name="femur_LF" joint="femur_joint_LF" ctrlrange="-2.5 2.5"/>
-    <position name="tibia_LF" joint="tibia_joint_LF" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_RR"  joint="coxa_joint_RR"  ctrlrange="-1.3500 1.3500"/>
+    <position name="femur_RR" joint="femur_joint_RR" ctrlrange="-1.8207 1.8243"/>
+    <position name="tibia_RR" joint="tibia_joint_RR" ctrlrange="-1.1760 1.3592"/>
+    <position name="coxa_RM"  joint="coxa_joint_RM"  ctrlrange="-0.9000 0.9000"/>
+    <position name="femur_RM" joint="femur_joint_RM" ctrlrange="-2.0737 2.0753"/>
+    <position name="tibia_RM" joint="tibia_joint_RM" ctrlrange="-1.1757 1.3592"/>
+    <position name="coxa_RF"  joint="coxa_joint_RF"  ctrlrange="-0.9000 0.9000"/>
+    <position name="femur_RF" joint="femur_joint_RF" ctrlrange="-1.8207 1.8243"/>
+    <position name="tibia_RF" joint="tibia_joint_RF" ctrlrange="-1.1760 1.3592"/>
+    <position name="coxa_LR"  joint="coxa_joint_LR"  ctrlrange="-1.3500 1.3500"/>
+    <position name="femur_LR" joint="femur_joint_LR" ctrlrange="-1.8243 1.8207"/>
+    <position name="tibia_LR" joint="tibia_joint_LR" ctrlrange="-1.3592 1.1760"/>
+    <position name="coxa_LM"  joint="coxa_joint_LM"  ctrlrange="-0.9000 0.9000"/>
+    <position name="femur_LM" joint="femur_joint_LM" ctrlrange="-2.0753 2.0737"/>
+    <position name="tibia_LM" joint="tibia_joint_LM" ctrlrange="-1.3592 1.1757"/>
+    <position name="coxa_LF"  joint="coxa_joint_LF"  ctrlrange="-0.9000 0.9000"/>
+    <position name="femur_LF" joint="femur_joint_LF" ctrlrange="-1.8243 1.8207"/>
+    <position name="tibia_LF" joint="tibia_joint_LF" ctrlrange="-1.3592 1.1760"/>
   </actuator>
 
   <sensor>

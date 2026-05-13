@@ -1,0 +1,190 @@
+<mujoco model="phantomX_simple">
+  <!--
+    PhantomX with primitive geoms instead of mesh STLs. Designed to be
+    drop-in equivalent to phantomx.xml for kinematics + dynamics:
+
+      * Same body positions, quats, joint axes/ranges, masses, COMs,
+        inertias, kp/kv, sensors, actuators.
+      * Mesh STL geoms replaced with capsules (limbs) + box (chassis) +
+        spheres (foot tips).
+      * Foot sphere placed at exactly (0.134, 0.031, 0) in tibia-local
+        frame — the position the empirical mesh-vertex search finds in
+        the original model. Preserves IK calibration so trained policies
+        don't see a kinematics change.
+
+    Why this exists:
+      * MJX strongly prefers primitives (mesh collision is hard to JIT).
+      * Faster collision detection in current SubprocVecEnv path too.
+      * Cleaner foot-tip math (no empirical vertex search).
+      * "Mesh is just meat on the wireframe; physics only cares about
+        geometry constraints" — the user's framing.
+  -->
+
+  <compiler angle="radian"/>
+
+  <option timestep="0.005" gravity="0 0 -9.81" integrator="RK4"/>
+
+  <default>
+    <joint damping="0.3" armature="0.01" frictionloss="0.01"/>
+    <geom condim="3" friction="1.5 0.05 0.05"/>
+    <position kp="60" kv="2" ctrllimited="true" ctrlrange="-3.14 3.14"
+              forcelimited="true" forcerange="-2.5 2.5"/>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.7 0.9" rgb2="1 1 1" width="512" height="512"/>
+    <texture name="floor" type="2d" builtin="checker" rgb1="0.4 0.4 0.4" rgb2="0.5 0.5 0.5" width="512" height="512"/>
+    <material name="floor" texture="floor" texrepeat="4 4" reflectance="0.1"/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" pos="0 0 4" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="10 10 0.1" material="floor" condim="3"/>
+
+    <body name="base" pos="0 0 0.18">
+      <freejoint/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.003 0.005 0.006"/>
+      <!-- Chassis box. Half-extents 0.135 x 0.115 x 0.020 m
+           = 270 x 230 x 40 mm overall (matches original mesh bbox). -->
+      <geom name="chassis" type="box" size="0.135 0.115 0.020" rgba="0.2 0.2 0.2 1"/>
+      <site name="imu" pos="0 0 0" size="0.005" rgba="0 1 0 0.5"/>
+
+      <!-- Right Rear -->
+      <body name="coxa_RR" pos="-0.12 -0.06 0" quat="0.382683 0 0 -0.92388">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_RR" axis="0 0 1" range="-2.0 2.0"/>
+        <geom name="coxa_geom_RR" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_RR" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_RR" axis="0 0 -1" range="-2.5 2.5"/>
+          <geom name="femur_geom_RR" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_RR" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_RR" axis="0 0 1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_RR" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_RR" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- Right Middle -->
+      <body name="coxa_RM" pos="0 -0.1 0" quat="0.707107 0 0 -0.707107">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_RM" axis="0 0 1" range="-1.0 1.0"/>
+        <geom name="coxa_geom_RM" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_RM" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_RM" axis="0 0 -1" range="-2.5 2.5"/>
+          <geom name="femur_geom_RM" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_RM" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_RM" axis="0 0 1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_RM" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_RM" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- Right Front -->
+      <body name="coxa_RF" pos="0.12 -0.06 0" quat="0.92388 0 0 -0.382683">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_RF" axis="0 0 1" range="-1.0 1.0"/>
+        <geom name="coxa_geom_RF" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_RF" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_RF" axis="0 0 -1" range="-2.5 2.5"/>
+          <geom name="femur_geom_RF" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_RF" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_RF" axis="0 0 1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_RF" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_RF" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- Left Rear -->
+      <body name="coxa_LR" pos="-0.12 0.06 0" quat="0.382683 0 0 0.92388">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_LR" axis="0 0 1" range="-1.0 1.0"/>
+        <geom name="coxa_geom_LR" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_LR" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_LR" axis="0 0 1" range="-2.5 2.5"/>
+          <geom name="femur_geom_LR" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_LR" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_LR" axis="0 0 -1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_LR" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_LR" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- Left Middle -->
+      <body name="coxa_LM" pos="0 0.1 0" quat="0.707107 0 0 0.707107">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_LM" axis="0 0 1" range="-1.0 1.0"/>
+        <geom name="coxa_geom_LM" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_LM" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_LM" axis="0 0 1" range="-2.5 2.5"/>
+          <geom name="femur_geom_LM" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_LM" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_LM" axis="0 0 -1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_LM" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_LM" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- Left Front -->
+      <body name="coxa_LF" pos="0.12 0.06 0" quat="0.92388 0 0 0.382683">
+        <inertial pos="0.026 0 0" mass="0.05" diaginertia="1e-5 2e-5 2e-5"/>
+        <joint name="coxa_joint_LF" axis="0 0 1" range="-1.0 1.0"/>
+        <geom name="coxa_geom_LF" type="capsule" fromto="0 0 0  0.052 0 0" size="0.018" rgba="0.8 0.3 0.1 1"/>
+        <body name="femur_LF" pos="0.052 0 0" quat="0.5 -0.5 0.5 0.5">
+          <inertial pos="0 -0.032 0" mass="0.08" diaginertia="3e-5 1e-5 3e-5"/>
+          <joint name="femur_joint_LF" axis="0 0 1" range="-2.5 2.5"/>
+          <geom name="femur_geom_LF" type="capsule" fromto="0 0 0  0 -0.065 0" size="0.014" rgba="0.8 0.3 0.1 1"/>
+          <body name="tibia_LF" pos="0 -0.065 0" quat="0 1 0 0">
+            <inertial pos="0 0 -0.05" mass="0.06" diaginertia="2e-5 2e-5 5e-6"/>
+            <joint name="tibia_joint_LF" axis="0 0 -1" range="-1.5 1.5"/>
+            <geom name="tibia_geom_LF" type="capsule" fromto="0 0 0  0.134 0.031 0" size="0.012" rgba="0.8 0.3 0.1 1"/>
+            <geom name="foot_LF" type="sphere" pos="0.134 0.031 0" size="0.008" rgba="0.1 0.1 0.1 1"/>
+          </body>
+        </body>
+      </body>
+
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="coxa_RR"  joint="coxa_joint_RR"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_RR" joint="femur_joint_RR" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_RR" joint="tibia_joint_RR" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_RM"  joint="coxa_joint_RM"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_RM" joint="femur_joint_RM" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_RM" joint="tibia_joint_RM" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_RF"  joint="coxa_joint_RF"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_RF" joint="femur_joint_RF" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_RF" joint="tibia_joint_RF" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_LR"  joint="coxa_joint_LR"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_LR" joint="femur_joint_LR" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_LR" joint="tibia_joint_LR" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_LM"  joint="coxa_joint_LM"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_LM" joint="femur_joint_LM" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_LM" joint="tibia_joint_LM" ctrlrange="-2.5 2.5"/>
+    <position name="coxa_LF"  joint="coxa_joint_LF"  ctrlrange="-2.0 2.0"/>
+    <position name="femur_LF" joint="femur_joint_LF" ctrlrange="-2.5 2.5"/>
+    <position name="tibia_LF" joint="tibia_joint_LF" ctrlrange="-2.5 2.5"/>
+  </actuator>
+
+  <sensor>
+    <accelerometer site="imu" name="imu_acc"/>
+    <gyro          site="imu" name="imu_gyro"/>
+    <framequat     objtype="site" objname="imu" name="imu_quat"/>
+  </sensor>
+
+</mujoco>

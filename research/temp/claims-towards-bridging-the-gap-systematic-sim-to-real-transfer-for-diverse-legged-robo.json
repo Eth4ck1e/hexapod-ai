@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "ETH Zurich PACE pipeline trains quadrupedal locomotion policies for 30,000 PPO iterations using 4096 parallel environments and 24 steps per environment per update, yielding approximately 2.95 billion total environment steps per training run.",
+    "stance": "supports",
+    "stance_target": "Multi-billion-step training budgets are standard for quadrupedal locomotion PPO",
+    "evidence_type": "empirical",
+    "scope_conditions": "Quadrupedal locomotion (ANYmal, Tytan, Minimal); Isaac Gym/Lab; blind policy; no dynamics randomization",
+    "quoted_support": "Number of iterations: 30,000. Steps per environment: 24. [with 4096 environments]",
+    "numbers": ["30,000 PPO iterations", "4096 parallel environments", "24 steps per environment per update", "~2.95B total environment steps (calculated: 30,000 × 4096 × 24)", "5 learning epochs per iteration", "10 mini-batches"],
+    "entities": ["ETH Zurich", "PACE", "ANYmal", "Tytan", "Minimal", "Isaac Gym", "PPO"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "towards-bridging-the-gap-systematic-sim-to-real-transfer-for-diverse-legged-robo"
+  },
+  {
+    "claim": "The PACE framework performs parameter identification using CMA-ES on 4096 parallel simulated environments, converging within a range of computational time on a single NVIDIA GeForce RTX 3080.",
+    "stance": "supports",
+    "stance_target": "CMA-ES actuator identification is compute-efficient on a single consumer GPU",
+    "evidence_type": "empirical",
+    "scope_conditions": "Actuator parameter identification only (not policy training); CMA-ES optimization; RTX 3080",
+    "quoted_support": "pace optimizations and simulations run on a single NVIDIA GeForce RTX 3080... With N=4096 environments, end-to-end optimization for each platform converges within [1 to] 24h per robot",
+    "numbers": ["4096 parallel environments (identification)", "1–24 hours per robot (CMA-ES)", "single NVIDIA GeForce RTX 3080", "20 trajectories of in-air data per robot"],
+    "entities": ["PACE", "CMA-ES", "ETH Zurich", "ANYmal", "RTX 3080"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "towards-bridging-the-gap-systematic-sim-to-real-transfer-for-diverse-legged-robo"
+  },
+  {
+    "claim": "PACE eliminates the need for dynamics randomization in policy training by substituting accurate actuator parameter identification, and requires only 4 reward terms (vs. 10+ in prior SOTA locomotion work).",
+    "stance": "supports",
+    "stance_target": "Accurate physics modeling reduces training complexity and reward engineering burden",
+    "evidence_type": "empirical",
+    "scope_conditions": "Blind quadrupedal locomotion; PMSM-actuated robots; flat and rough terrain",
+    "quoted_support": "Because pace identifies the dynamics end-to-end, we do not use dynamics randomization... Empirical evidence that only four reward terms suffice for effective locomotion training.",
+    "numbers": ["4 reward terms", "30,000 PPO iterations", "zero-shot sim-to-real deployment"],
+    "entities": ["PACE", "ETH Zurich", "ANYmal"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "towards-bridging-the-gap-systematic-sim-to-real-transfer-for-diverse-legged-robo"
+  },
+  {
+    "claim": "PACE achieves a 32% reduction in Cost of Transport (CoT) for ANYmal compared to prior state-of-the-art, with ANYmal D reaching CoT = 1.27 versus ANYmal C at 1.86.",
+    "stance": "supports",
+    "stance_target": "Physics-grounded reward formulations outperform heuristic reward shaping for energy efficiency",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped; flat track locomotion; full Cost of Transport including electronics",
+    "quoted_support": "achieving a 32 reduction in the full Cost of Transport of ANYmal (1.27)... CoT reduces to 1.27 (vs. 1.86 for ANYmal C)",
+    "numbers": ["CoT = 1.27 (ANYmal D, PACE)", "CoT = 1.86 (ANYmal C, prior SOTA)", "32% CoT reduction"],
+    "entities": ["PACE", "ANYmal D", "ANYmal C", "ETH Zurich"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "towards-bridging-the-gap-systematic-sim-to-real-transfer-for-diverse-legged-robo"
+  },
+  {
+    "claim": "The PACE framework validates zero-shot policy transfer on 13+ legged robot platforms spanning humanoids, quadrupeds, and hexapods, demonstrating that the training approach generalizes across robot morphologies.",
+    "stance": "supports",
+    "stance_target": "PPO with physics-grounded reward trains generalizable locomotion controllers across diverse robot types",
+    "evidence_type": "empirical",
+    "scope_conditions": "3 primary platforms + 10+ additional systems; open and closed-source platforms; PMSM-actuated",
+    "quoted_support": "The framework is tested on three primary platforms and deployed on ten additional robots, demonstrating reliable policy transfer without randomization of dynamic parameters.",
+    "numbers": ["3 primary platforms", "10+ additional systems deployed", "13+ total platforms"],
+    "entities": ["ANYmal", "Tytan", "Minimal", "NAO", "Aibo", "GR-1", "ETH Zurich"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "towards-bridging-the-gap-systematic-sim-to-real-transfer-for-diverse-legged-robo"
+  }
+]

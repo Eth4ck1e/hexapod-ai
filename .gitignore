@@ -15,8 +15,23 @@ env/
 # Training artifacts
 checkpoints/
 logs/
+legacy/logs/
 *.zip
 *.tfevents.*
+
+# JAX persistent compile cache (multi-GB, regenerated on first run)
+.cache/
+
+# Recorded videos / large media
+media/recordings/
+media/videos/
+
+# Warp terminal local config
+.warp/
+
+# Hyperresearch generated state (DB rebuilds from research/notes/, exports are derived)
+.hyperresearch/hyperresearch.db
+.hyperresearch/exports/
 
 # IDE / OS
 .vscode/
@@ -33,3 +48,9 @@ hexapod_ros/
 # Generated / one-off
 *.log
 *.err
+
+# TO sweep cache (transient, ~2MB; regenerate from to_omni_sweep.py)
+tools/cache/
+
+# Third-party binaries (HSL is per-user licensed, must not be redistributed)
+vendor/

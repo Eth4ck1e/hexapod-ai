@@ -1,0 +1,326 @@
+{
+  "coxa_joint_RR": {
+    "empirical_raw": [
+      -2.0,
+      2.0
+    ],
+    "empirical": [
+      -1.5,
+      1.5
+    ],
+    "buffered": [
+      -1.35,
+      1.35
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "outer_rear"
+  },
+  "coxa_joint_LR": {
+    "empirical_raw": [
+      -1.0,
+      1.0
+    ],
+    "empirical": [
+      -1.5,
+      1.5
+    ],
+    "buffered": [
+      -1.35,
+      1.35
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "outer_rear"
+  },
+  "femur_joint_RR": {
+    "empirical_raw": [
+      -2.023188729999979,
+      2.026811269999979
+    ],
+    "empirical": [
+      -2.023188729999979,
+      2.026811269999979
+    ],
+    "buffered": [
+      -1.820688729999981,
+      1.8243112699999813
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": -0.21818873,
+    "group": "outer_rear"
+  },
+  "femur_joint_LR": {
+    "empirical_raw": [
+      -2.026811269999979,
+      2.023188729999979
+    ],
+    "empirical": [
+      -2.026811269999979,
+      2.023188729999979
+    ],
+    "buffered": [
+      -1.8243112699999813,
+      1.820688729999981
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.21818873,
+    "group": "outer_rear"
+  },
+  "tibia_joint_RR": {
+    "empirical_raw": [
+      -1.3168880099999938,
+      1.5
+    ],
+    "empirical": [
+      -1.3168880099999938,
+      1.5
+    ],
+    "buffered": [
+      -1.176043609499994,
+      1.3591555995000002
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": -0.32188801,
+    "group": "outer_rear"
+  },
+  "tibia_joint_LR": {
+    "empirical_raw": [
+      -1.5,
+      1.3168880099999938
+    ],
+    "empirical": [
+      -1.5,
+      1.3168880099999938
+    ],
+    "buffered": [
+      -1.3591555995000002,
+      1.176043609499994
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.32188801,
+    "group": "outer_rear"
+  },
+  "coxa_joint_RF": {
+    "empirical_raw": [
+      -1.0,
+      1.0
+    ],
+    "empirical": [
+      -1.0,
+      1.0
+    ],
+    "buffered": [
+      -0.9,
+      0.9
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "outer_front"
+  },
+  "coxa_joint_LF": {
+    "empirical_raw": [
+      -1.0,
+      1.0
+    ],
+    "empirical": [
+      -1.0,
+      1.0
+    ],
+    "buffered": [
+      -0.9,
+      0.9
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "outer_front"
+  },
+  "femur_joint_RF": {
+    "empirical_raw": [
+      -2.023188729999979,
+      2.026811269999979
+    ],
+    "empirical": [
+      -2.023188729999979,
+      2.026811269999979
+    ],
+    "buffered": [
+      -1.820688729999981,
+      1.8243112699999813
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": -0.21818873,
+    "group": "outer_front"
+  },
+  "femur_joint_LF": {
+    "empirical_raw": [
+      -2.026811269999979,
+      2.023188729999979
+    ],
+    "empirical": [
+      -2.026811269999979,
+      2.023188729999979
+    ],
+    "buffered": [
+      -1.8243112699999813,
+      1.820688729999981
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.21818873,
+    "group": "outer_front"
+  },
+  "tibia_joint_RF": {
+    "empirical_raw": [
+      -1.3168880099999938,
+      1.5
+    ],
+    "empirical": [
+      -1.3168880099999938,
+      1.5
+    ],
+    "buffered": [
+      -1.176043609499994,
+      1.3591555995000002
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": -0.32188801,
+    "group": "outer_front"
+  },
+  "tibia_joint_LF": {
+    "empirical_raw": [
+      -1.5,
+      1.3168880099999938
+    ],
+    "empirical": [
+      -1.5,
+      1.3168880099999938
+    ],
+    "buffered": [
+      -1.3591555995000002,
+      1.176043609499994
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.32188801,
+    "group": "outer_front"
+  },
+  "coxa_joint_RM": {
+    "empirical_raw": [
+      -1.0,
+      1.0
+    ],
+    "empirical": [
+      -1.0,
+      1.0
+    ],
+    "buffered": [
+      -0.9,
+      0.9
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "middle"
+  },
+  "coxa_joint_LM": {
+    "empirical_raw": [
+      -1.0,
+      1.0
+    ],
+    "empirical": [
+      -1.0,
+      1.0
+    ],
+    "buffered": [
+      -0.9,
+      0.9
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": 0.0,
+    "group": "middle"
+  },
+  "femur_joint_RM": {
+    "empirical_raw": [
+      -2.304189059999973,
+      2.305810939999973
+    ],
+    "empirical": [
+      -2.304189059999973,
+      2.305810939999973
+    ],
+    "buffered": [
+      -2.0736890599999755,
+      2.0753109399999756
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": -0.24918906,
+    "group": "middle"
+  },
+  "femur_joint_LM": {
+    "empirical_raw": [
+      -2.305810939999973,
+      2.304189059999973
+    ],
+    "empirical": [
+      -2.305810939999973,
+      2.304189059999973
+    ],
+    "buffered": [
+      -2.0753109399999756,
+      2.0736890599999755
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.24918906,
+    "group": "middle"
+  },
+  "tibia_joint_RM": {
+    "empirical_raw": [
+      -1.3165011299999938,
+      1.5
+    ],
+    "empirical": [
+      -1.3165011299999938,
+      1.5
+    ],
+    "buffered": [
+      -1.175676073499994,
+      1.3591749435000002
+    ],
+    "stop_reason_lo": "self_collision",
+    "stop_reason_hi": "mjcf_limit_hi",
+    "neutral": -0.26150113,
+    "group": "middle"
+  },
+  "tibia_joint_LM": {
+    "empirical_raw": [
+      -1.5,
+      1.3165011299999938
+    ],
+    "empirical": [
+      -1.5,
+      1.3165011299999938
+    ],
+    "buffered": [
+      -1.3591749435000002,
+      1.175676073499994
+    ],
+    "stop_reason_lo": "mjcf_limit_lo",
+    "stop_reason_hi": "self_collision",
+    "neutral": 0.26150113,
+    "group": "middle"
+  }
+}

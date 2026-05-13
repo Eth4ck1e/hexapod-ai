@@ -1,688 +1,430 @@
 # Project context for Claude Code
 
-This file is auto-read by Claude Code at session start. It carries the
-design decisions, current state, and working-style preferences that the
-local `.claude/` memory system captures, so any Claude instance opening
-this repo on any machine has the context. Edit freely if anything below
-becomes stale.
+This file is auto-read by Claude Code at session start. Carries the
+design decisions, current state, and working-style preferences.
 
 ## Project goal
 
 Reinforcement-learning locomotion controller for a PhantomX-style
-hexapod, deployed eventually on an ESP32-S3 microcontroller. PPO trains
-a residual policy on top of a working analytical gait scaffold; the
-scaffold fades out across a 4-stage curriculum so the final policy is
-fully autonomous and able to learn emergent behaviors (max-speed
-exploration, rolling tricks) beyond what the analytical gait can do.
+hexapod, deployed eventually on an ESP32-S3 microcontroller. Trains a
+policy via supervised learning + RL on top of a working analytical gait
+scaffold; scaffold serves as both initialization (BC pretrain) AND as
+the motion-prior source for AMP-guided RL refinement.
 
-## Current state (2026-04-29)
+## ⚠️ Path note — directory moved 2026-05-13
 
-Gait library uses **closed-form, vectorized IK** with full overlay
-support (stance width/height, body tilt, spin). All gait math validated
-sub-millimeter against MJCF FK. The `IK_gait.py` sandbox tested every
-overlay independently (smart test script with 19 phases covers them
-all). Training pipeline integrated and benchmarked at the workstation's
-sweet spot. Long-form curriculum training runs reasonable.
+The project root was relocated off OneDrive to fix sync issues. Active
+paths now:
 
-**Best policy: BC v2** (`checkpoints/bc_pretrained_v2/policy.zip`,
-gitignored). Trained via supervised behavioral cloning on 20M scaffold
-demonstrations across stage=3 (full motion). Walks indefinitely at
-clean cmds, completes ~70% of stochastic stage=3 episodes — failures
-are `no_progress` at near-extreme combined cmds (real operational
-limit, not a bug). RL fine-tuning attempts (v3, v6) have so far ended
-worse than BC v2 because PPO's stochastic noise destabilizes the
-working walker faster than it can find improvements. See "Methodology
-learnings" below for the noise-vs-refinement tradeoff.
+- **Windows**: `C:\Users\Eth4ck1e\Documents\Hexapod AI Project`
+- **WSL mount**: `/mnt/c/Users/Eth4ck1e/Documents/Hexapod AI Project`
+- **Hyperresearch CLI**: `C:\Users\Eth4ck1e\Documents\Hexapod AI Project\.venv\Scripts\hyperresearch.exe`
 
-**Unified cross-platform stack (2026-04-29 — was a Mac/Linux split).**
-Single `envs/hexapod_env.py` and `train.py` work on both platforms. The
-viewer-mechanism difference that originally forced the split (macOS's
-Cocoa viewer can only run under mjpython, but SubprocVecEnv workers
-run plain `python`) is resolved by routing live-watch through shared
-memory on both platforms: env-0 publishes qpos+qvel+sim_time to the
-`hexapod_live_state` SHM region every step, and a separate viewer
-process reads it. On macOS run that viewer with `mjpython
-live_viewer.py`; on Linux just `python live_viewer.py`.
+**Dead paths** (do not use):
+- `C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`
+- `/mnt/c/Users/Eth4ck1e/OneDrive/Documents/Hexapod AI Project`
 
-The previous Mac variant carried all the recent improvements (drift
-penalty, polar-sampled translation, contact shaping, foot deviation,
-no_progress termination, BC infrastructure, pitch sign fix, etc.).
-The unified version is that codebase — the older Linux env/train were
-deleted as obsolete. Snapshots in `snapshots/*_pre_unify.py` preserve
-the pre-unification state.
+WSL venv at `~/.venv-mjx/` lives in WSL home — unaffected by the move.
 
-All scripts (`watch.py`, `watch_demo.py`, `pilot_ai.py`, `pretrain_bc.py`)
-import directly from `envs.hexapod_env` — no platform-detect needed.
+## Current state (2026-05-13)
 
-## Architecture (locked decisions)
+**MJX pipeline mature and battle-tested.** PPO training runs at
+~200k it/s on the RTX 5060 Ti via WSL2. A 1B-step run (20 × 50M
+segments) finishes in ~2.5-3 hr. Optimal config (for current 114-dim
+obs + 150-bin partition disc): `num_envs=2048`, `batch=256`,
+`minibatches=8`, `unroll_length=20`. Note: `num_envs` dropped from
+4096 → 2048 in v24 to fit larger obs + multi-head disc in 16 GB
+VRAM. Same for `DISC_BATCH` 1024 → 512 and `N_ENVS_DEMO` 4096 → 2048.
 
-- **`gait/` package** is the single source of truth for gait math.
-  `Controller` class: stateful, `predict(cmd, t) → 18 joint targets`.
-  Used by `simple_gait.py` (demo viewer), `IK_gait.py` (sandbox),
-  `pilot.py` (teleop), `envs/hexapod_env.py` (training), eventually
-  ESP32-S3 firmware.
-- **Cmd vector** (9 floats, physical units):
-  ```
-  [0] vx           m/s     body forward velocity
-  [1] vy           m/s     body lateral velocity (left = +)
-  [2] wz           rad/s   body yaw rate (CCW = +)
-  [3] pitch        rad     body pitch target (nose up = +)
-  [4] roll         rad     body roll target (LEFT side up = +; standard
-                                              Euler — matches what
-                                              env's _body_pitch_roll
-                                              computes from the quat)
-  [5] height_delta m       stance height delta (- raises body)
-  [6] width_delta  m       stance width delta from neutral (+ wider)
-  [7] shift_x      m       body shift in body +X       (RESERVED — task #8)
-  [8] shift_y      m       body shift in body +Y       (RESERVED — task #8)
-  ```
-- **Reward (minimal)**: `tracking_exp(-||cmd-actual||²) + 0.1*survive
-  - 0.01*action_delta² - 0.02*body_angvel² + (stage 4 only) novelty`.
-  Errors are normalized per-slot by `_err_inv_scales` so each axis
-  contributes commensurately. Tracking compares ALL body kinematics
-  every step regardless of which stage the bot is in — locked cmd
-  slots are zero, so any actual deviation creates real tracking error.
-  This is what makes the bot learn smooth controlled locomotion vs
-  jerky lurching that happens to track velocity.
-- **Curriculum / training modes** (in `train.py`):
-  Two supported modes — pick via `INITIAL_STAGE` and `SKIP_SCAFFOLD`
-  constants at the top of `train.py`:
-  - **BC-init refinement** (current default; `INITIAL_STAGE=3`,
-    `SKIP_SCAFFOLD=True`). Loads BC-pretrained policy via `--bc-init`,
-    runs single-stage at gait_scale=0.0 throughout (scaffold suppressed).
-    All cmd slots active from step 0 (translation, yaw, height, width,
-    pitch, roll). Recommended for refining a working walker. Pair with
-    `--log-std-init -3.0` for refinement noise calibration.
-  - **From-scratch curriculum** (`INITIAL_STAGE=1`, `SKIP_SCAFFOLD=False`).
-    Original 4-stage mode that progressively unlocks cmd slots and
-    fades the scaffold:
-    - Stage 1: vx, vy. `gait_scale=1.0` throughout.
-    - Stage 2: + wz, height, width. `gait_scale 1.0 → 0.6`.
-    - Stage 3: + pitch, roll. `gait_scale 0.6 → 0.0`.
-    - Stage 4: pure policy, novelty bonuses, body_linvel dropped from obs.
-    - Adaptive advance: tracking ≥ 0.65 AND fall rate ≤ 0.30 AND min
-      step count reached.
-    Per-stage step budgets (`STAGE_MIN_STEPS`) and `gait_scale`
-    envelope (`STAGE_GAIT_SCALE`) live in `train.py` and have been
-    iterated several times. Current values reflect "scaffold is good
-    enough that early fading is safe."
-- **Default stance widening**: `Controller.DEFAULT_STANCE_WIDTH = 0.015`
-  (+15 mm outward per foot). The widened rest gives a more vertical
-  foot-ground contact angle and generally walks better than the
-  calibrated rest. `Controller.gait_neutral_pose` exposes the joint
-  pose at this widened rest; env uses this for spawn settle (not the
-  hardcoded `NEUTRAL_POSE`, which corresponds to the un-widened rest
-  and is just the IK calibration anchor).
-- **Deployment plan**: analytical gait library ships to ESP32-S3 as a
-  standalone "manual mode" AND as a safety fallback under the policy.
-  Three runtime modes: manual / ai / assisted.
+**AMP pipeline went through ~20 design iterations** v3 through v25.
+Major architecture shifts in chronological order:
+- v8: hardware-realistic max speed (0.356 m/s, MAX_SPEED 5× faster)
+- v10: initial-pose domain randomization
+- v11: paper-matching network (256, 128, 64) actor
+- v15: cmd-conditional discriminator (CMD_DIM_FOR_DISC=3 initially)
+- v17: full 9-D cmd in discriminator
+- v18: K-NN cmd-matched prior sampling (K=10), normalized distance
+- v21: uniform-z foot rest (fixed 3mm middle-leg asymmetry — `gait/controller.py` normalizes)
+- v22: recovery curriculum (push impulses) — **SHELVED**, hexapod stability profile makes pushes the wrong test
+- v23: **partition discriminator** (150 bins = 6 motion × 5 height × 5 width). Strict within-bin prior sampling. Fixed the cmd-blur failure mode where disc rewarded turning under straight cmd.
+- v24: **motor feedback obs** (joint_torque + joint_pos_error). Obs 78 → 114 dims. Simulates AX-12A "present load" + "present position" feedback. Critical prerequisite for terrain training.
+- v25 (in flight): **EMA-filtered velocity tracking** (alpha=0.05, ~100ms window) + **gait-phase contact penalty** — designed to defeat the v24 metric-gaming failure mode where the policy hit +458 tracking but visually didn't walk because instantaneous velocity tracking is jitter-gameable.
+
+**Current best walking policy**: `checkpoints/amp_to_v23/iter12/final/params.pkl` (peak +602 eval, +267 tracking, clean visual walking on all 9 motion tests). Trained on 78-dim obs; watcher auto-detects and slices accordingly.
+
+**v24 is metric-better but visually broken**: eval +740, tracking +458 (~+75% over v23) — but the bot doesn't actually walk well. Same metric-vs-visual decoupling pattern we hit in v14/v15. Diagnosis: instantaneous velocity tracking is gameable via wobble/jitter; the new 36 obs dims gave the policy more capacity to game. v25 fixes the gameable signal.
+
+**Hardware reality check.** Bot is a Trossen PhantomX MK-III using **Dynamixel AX-12A** servos (TTL half-duplex multidrop UART, daisychained). Motor specs: 6.18 rad/s no-load, **1.5 N·m stall**, 9-12 V. Computed practical max walking speed: ~0.40 m/s. MJCF `forcerange` ±1.5 N·m matches real motor envelope. Full analysis in `docs/MAX_SPEED_ANALYSIS.md`.
+
+## Single source of truth modules (the unification pattern)
+
+Three modules own schema/configuration that needs to stay consistent
+across the env, watcher, training scripts, and tools. **When you
+change anything in one of these areas, edit ONLY the owning module.**
+
+| Module | Owns | Consumers |
+|---|---|---|
+| `envs/obs_layout.py` | Policy observation schema (114 dims, ordered slots) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
+| `envs/stance_envelope.py` | Stance height + dh-conditional width envelope | JAX env cmd sampler, watch_scaffold interactive presets, demo_phases watch tests |
+| `envs/cmd_bins.py` | 150-bin partition (motion × height × width) | JAX env disc routing, prior_data binning, multi-head disc, train_jax_amp |
+
+If you find yourself manually syncing the same constant or formula
+between two files, **that's a signal to extract it to a SoT module**.
+This pattern saved us from at least three drift bugs in v23→v25.
+
+## Two training paths
+
+| | **MJX (PRIMARY)** | **SubprocVecEnv (LEGACY)** |
+|---|---|---|
+| env | `envs/hexapod_env_jax.py` (pure-JAX) + `envs/hexapod_brax_env.py` (Brax adapter) | `envs/hexapod_env.py` (gym, numpy + MuJoCo) |
+| controller | `gait/controller_jax.py` (pure-JAX) | `gait/controller.py` (numpy) |
+| BC pretrain | `scripts/pretrain_bc_jax.py` | `legacy/sb3/pretrain_bc.py` |
+| training | `scripts/train_jax_amp.py` (Brax PPO + AMP on GPU) | `legacy/sb3/train.py` (SB3 PPO on CPU) |
+| watch | `scripts/watch_demo_jax.py` (uses gym env for inference) | `legacy/sb3/watch_demo.py` |
+| MJCF | `models/phantomx_simple_mjx.xml` | `models/phantomx.xml` |
+| effective throughput | ~200k it/s end-to-end (was 240k pre-v24 with smaller obs) | ~5,400 SPS |
+
+**Important**: the gym env is now used ONLY for watch / eval / record.
+Both envs construct obs via the shared `envs/obs_layout.py` module so
+the gym env produces JAX-convention obs (qpos-based quat, qvel-based
+gyro, zero accel) matching what the policy saw during training.
+
+## AMP architecture (current, v23+)
+
+- **Discriminator**: `amp.discriminator.MultiHeadDiscriminator` — 2-layer shared backbone (1024, 512) + 150 output heads (one per cmd bin). Inference selects the active bin's head; training routes per-bin gradient. Total ~1.55M params, ~6 MB on GPU.
+- **Loss**: `multihead_discriminator_loss` — LSGAN + gradient penalty on prior batch, weight 10.0. Each bin's head gets gradient only from its-bin samples; shared backbone gets gradient from all.
+- **Style reward**: `multihead_style_reward` — `max(0, 1 - 0.25 * (D(transition, bin) - 1)²)`. Bounded in [0, 1]. Added to env reward via `λ_style * style_r` where `λ_style = 0.5` default.
+- **Prior format**: npz with `states_t` (N, 49) + `states_t1` (N, 49) + `cmds_t` (N, 9) + `bin_idx_t` (N,) — `bin_idx_t` is precomputed by `amp/prior_data.py` via `cmd_bins.cmd_to_bin()`. Current production prior: `checkpoints/amp_priors_v23.npz` (6.1M transitions, 150 bins, all populated, min 15k / median 42k samples per bin).
+- **AMP state dim**: 49 (joint_pos 18 + joint_vel 18 + body_linvel_body 3 + body_angvel 3 + body_height 1 + foot_heights 6). Unchanged since v3. NOT affected by obs schema changes — obs is what the policy sees, AMP state is what the disc sees.
+
+## Reward function (current, v25)
+
+In `envs/hexapod_env_jax.py:_compute_reward`. Active terms:
+
+- **Positive**:
+  - `tracking_reward` — gaussian on cmd-vs-actual error. Motion components (vx, vy, wz) are **EMA-filtered** since v25 to defeat jitter-gaming. Posture components (pitch, roll, dh, dw) are instantaneous.
+- **Penalties** (all subtracted):
+  - `action_rate_pen` (w=0.01) — smoothness
+  - `z_vel_pen` (w=1.0) — discourages body bounce
+  - `body_angvel_xy_pen` (w=0.08) — discourages body twist
+  - `joint_torque_pen` (w=2e-6) — paper value
+  - `joint_vel_limit_pen` (w=0.5) — deadband+quadratic over 90% of motor max
+  - `joint_torque_limit_pen` (w=0.05) — deadband+quadratic over 90% of stall
+  - `foot_force_limit_pen` (w=0.1) — penalize foot contact forces > 30 N
+  - `contact_mismatch_pen` (w=0.02) — v25 NEW. Penalizes feet whose actual contact state doesn't match expected tripod phase (groups A={0,2,4} vs B={1,3,5} alternate stance/swing per gait cycle).
+- **Zeroed** (deprecated but kept in metrics for log-parser compat):
+  - `yaw_drift_pen`, `vy_drift_pen` (w=0; were overcompensating)
+  - `sliding_pen`, `excess_contact_pen`, `airborne_pen`, `short_contact_pen`, `foot_dev_pen` (legacy contact penalties from pre-AMP era)
+
+**Style reward** is added by `HexapodAMPEnv.step` separately. NOT in `_compute_reward`.
+
+## Cmd vector (9 floats, physical units)
+
+```
+[0] vx           m/s     body forward velocity
+[1] vy           m/s     body lateral velocity (left = +)
+[2] wz           rad/s   body yaw rate (CCW = +)
+[3] pitch        rad     body pitch target (nose up = +)
+[4] roll         rad     body roll target (LEFT side up = +)
+[5] height_delta m       stance height delta (- raises body)
+[6] width_delta  m       stance width delta from neutral (+ wider)
+[7] shift_x      m       body shift in body +X  (currently unused, fixed 0)
+[8] shift_y      m       body shift in body +Y  (currently unused, fixed 0)
+```
+
+**Stance envelope** (verified 2026-05-10, owned by `envs/stance_envelope.py`):
+- `dh ∈ [-0.045, +0.035]` m. 5 preset heights at -45, -25, -5, +15, +35 mm.
+- `dw` is dh-conditional. Linear envelope: `max_dw(dh) = 0.0703 + 0.8333·dh`, `min_dw(dh) = -0.0283 + 0.25·dh`. JAX env's cmd sampler clips dw per dh.
+
+## Multi-stage training pipeline (current view)
+
+- ✅ **Stage 0** — BC pretrain (mimics scaffold; zero foot residual = scaffold motion). Current best: `bc_pretrained_jax_v24`.
+- ✅ **Stage 1** — AMP-guided PPO with partition disc. Current best: `amp_to_v23/iter12` (clean walker).
+- ⏳ **Stage 1b** (current) — refine reward to be ungameable (v25 EMA tracking + contact penalty).
+- ⏳ **Stage 2** — Heavy domain randomization (#82). Motor strength, friction, payload, joint stiffness, IMU noise. Sim-to-real critical.
+- ⏳ **Stage 3** — Terrain randomization (#72). Perlin heightfield + obstacles. AMP's actual value-add over scaffold becomes visible here.
+- ⏳ **Stage 4** — PTQ int8 quantization (#101). ~50 KB deployable model.
+- ⏳ **Stage 5** — ESP32-S3 firmware (#77). Policy inference + scaffold + servo bus + BT controller.
+
+## Active task plan (post-2026-05-13)
+
+**In execution order. See task list (#100+) for current.**
+
+**Now / immediate:**
+1. ⏳ v25 (#106) — fresh chain with EMA tracking + contact penalty (just kicked off)
+2. ⏳ v25 watch test — verify gameable tracking is defeated
+
+**Phase 2 (after v25 settles):**
+3. ⏳ Heavy DR (#82) — motor strength, friction, payload, sensor noise
+4. ⏳ Terrain (#72) — perlin heightfield + obstacles, regen priors on terrain
+
+**Phase 3 (deployment prep):**
+5. ⏳ PTQ int8 (#101) — int8 quantize the final policy
+6. ⏳ QAT fallback (#102) — only if PTQ degrades quality
+
+**Phase 4 (hardware, when bot arrives):**
+7. ⏳ AX-12A endpoint calibration (#74)
+8. ⏳ ESP32 firmware (#77)
+
+**Backlog / nice-to-have:**
+- Asymmetric A-C with privileged critic (#85)
+- Memory/temporal encoder (#86)
+- Distillation only if PTQ insufficient (#87)
+- Pedagogical 3D gait visualizer (#64)
+- Learning topic: num_envs vs PPO quality (#25)
 
 ## Important non-obvious things
 
-- **Gait IK is closed-form and vectorized** (was iterative `mj_jac`
-  during the first integration; replaced after benchmarking exposed
-  it as the dominant cost). Sub-mm round-trip accuracy validated
-  against MJCF FK across the full reachable workspace. See
-  `docs/kinematics.md` for the derivation. The closed-form path uses
-  per-leg formula→MJCF offsets calibrated once at boot to handle the
-  MJCF's non-trivial femur/tibia body quaternions and per-side axis
-  flips.
-- **Per-joint sign conventions** for the closed-form IK are
-  unintuitive: coxa always +1; femur +1 right / -1 left; tibia
-  -1 right / +1 left (femur and tibia are flipped between right and
-  left, and the formula's bend convention is opposite of MJCF tibia's
-  positive rotation, so right-side tibia gets -1 by itself even
-  before the side flip). Don't try to "simplify" by negating all
-  three for left legs — that breaks the math.
-- **Foot tip is empirical, not (0, 0, -TIBIA_LENGTH).** The PhantomX
-  tibia mesh has its tip at tibia-local `(0.134, 0.031, 0.0)`,
-  magnitude 0.138 m. `TIBIA_LENGTH = 0.138`, NOT 0.133. Using 0.133
-  in the IK formula breaks correctness off the rest pose. The +0.031
-  Y component is also baked into the offset table — this is why the
-  tibia formula→MJCF offset comes out to ≈ -1.346 rad (= 90° + 13°,
-  the angular offset from "tibia along straight extension" to "MJCF
-  tibia=0 link direction").
-- **Speed-magnitude variation: polar sampling, clamped magnitude.**
-  Translation cmd is sampled in polar (heading, magnitude) form: heading
-  uniform in [0, 2π), magnitude in `[SPEED_MIN_FRAC, SPEED_MAX_FRAC] ×
-  MAX_SPEED` (currently `[0.40, 0.85]`). The lower bound avoids the
-  "stand still" failure mode (magnitude ≈ 0 episodes encourage do-
-  nothing policies); the upper bound avoids the "ragged edge" mode
-  (magnitude = MAX_SPEED sits at scaffold capacity, looks ugly). The
-  Controller still models speed via stride-scaling only (no period
-  modulation yet); the `IK_gait.py` sandbox has the period+stride
-  proof-of-concept for when we eventually want a wider envelope.
-- **macOS viewer requires `mjpython`**, not plain `python`, for any
-  script that calls `mujoco.viewer.launch_passive`. Affects
-  `simple_gait.py`, `IK_gait.py`, `pilot.py`, `pilot_ai.py`, `watch.py`,
-  `watch_demo.py`, `watch_tiled.py`, `live_viewer.py`. Headless scripts
-  (`train.py`, `pretrain_bc.py`, `bench_n_envs.py`) use plain `python`.
-  Linux has no such restriction — every script just uses `python`.
-- **`WATCH_LIVE=True`** publishes env-0's qpos+qvel+sim_time to the
-  `hexapod_live_state` shared-memory region every step. Run
-  `live_viewer.py` (mjpython on macOS, python on Linux) in a separate
-  terminal to render. **Don't try to launch `train.py` itself with
-  mjpython expecting the workers to inherit it — they don't, because
-  mjpython is a shell wrapper around the underlying python interpreter,
-  and `sys.executable` in the SubprocVecEnv workers points at python.**
-- **`pilot.py` keyboard layout collides with mujoco viewer hotkeys.**
-  Accepted as fine for testing only. Long-term: gamepad support via
-  pygame; gamepad axes don't conflict.
-- **Pitch sign convention** (resolved 2026-04-29). The env's
-  `_body_pitch_roll` extracts pitch via standard right-hand-rule math
-  (positive = nose DOWN). The cmd convention and the gait controller
-  use aerospace (positive = nose UP). The two were inconsistent for
-  multiple sessions, surfacing as "scaffold can't track tilt" / "BC
-  policy tilts wrong way" — neither was the actual bug. Fixed by
-  negating `asin()` in `_body_pitch_roll`. Roll has no analogous bug
-  (X-axis rotation conventions agree).
-- **`StageManagerCallback` must use `env_method`, NOT `set_attr`** to
-  mutate `gait_scale` / `stage` on the VecEnv. SB3's `set_attr` only
-  mutates the outer `Monitor` wrapper; gym wrappers don't propagate
-  setattr to the wrapped env. We added `set_gait_scale()` /
-  `set_stage()` methods on `HexapodEnv` and the callback uses
-  `env_method("set_gait_scale", value)` to reach the inner env. Older
-  set_attr-based code silently failed — entire training runs were at
-  the initial gait_scale value despite TB recording the intended
-  schedule.
-- **Legacy demo scripts are now broken**: `sandbox.py`, `gait_design.py`,
-  `walk_test.py` import deleted constants from the old env. They've
-  been superseded by `simple_gait.py`, `IK_gait.py`, `pilot.py`. Safe
-  to delete; left in repo for now as historical reference.
-- **Snapshots** in `snapshots/` are historical versions of important
-  files captured before risky refactors (e.g., `*_v1_pre_integration.py`
-  are the pre-IK-refactor controller, env, and IK_gait state). Useful
-  for revert paths.
+- **Gait IK is closed-form and vectorized**. Sub-mm round-trip accuracy validated against MJCF FK. See `docs/kinematics.md`.
+- **Per-joint sign conventions**: coxa always +1; femur +1 right / -1 left; tibia -1 right / +1 left. Don't "simplify" by negating all three for left legs — breaks the math.
+- **Foot tip is empirical**: tibia-local `(0.134, 0.031, 0.0)`. The simple models replicate this with a foot sphere geom at the same position.
+- **Foot z is normalized to uniform plane in body frame** (v21+). `gait/controller.py:calibrate()` sets `LEG_ORIGIN_BODY[:, 2] = mean(z)` so all 6 feet sit at exactly -145.99 mm in body frame. Fixes a 3mm asymmetry from MJCF coxa mount differences.
+- **Foot sphere has ~7 mm radius**: stance detection from `geom_xpos` uses threshold `z < 12 mm`.
+- **Pitch sign convention**: env's `_body_pitch_roll` extracts via standard math (positive = nose DOWN), then negates to match aerospace convention.
+- **Body-side coxa convention**: same MJCF axis on R and L coxas, but legs mount on opposite body sides → +rotation swings the leg in OPPOSITE physical directions.
+- **MJX requires Euler integrator + trimmed contact pairs**. `phantomx_simple_mjx.xml` uses `integrator="Euler"`, `iterations="20"`, contact bitmasks restricting to feet↔floor. Gives 200k+ it/s vs ~6k with defaults.
+- **Brax 0.14.2 + JAX 0.10 incompat**: Brax uses `jax.device_put_replicated` which JAX 0.10 removed. `scripts/train_jax_amp.py` shims it before importing brax.
+- **PowerShell `>>` continuation breaks `wsl bash -lc "..."`**: paste the whole invocation as ONE physical line.
+- **Always use `python -u` when piping training stdout through `tee`**: block-buffered pipes can swallow hours of training output before flushing.
+- **The hovering exploit (pre-v23 era)**: with airborne/contact penalties disabled, the policy maximizes velocity-tracking by hovering. v22+ partial fix via cmd-conditional disc, v25 explicit fix via contact_mismatch_pen.
+- **Reward hacking is the dominant failure mode.** Every reward shaping the policy will exploit if there's a degenerate strategy that scores well. v14/v15 hit it (high reward, no walking). v24 hit it again (better metrics, worse walking). v25's EMA + contact penalty is the structural fix.
+- **Watcher auto-detects policy obs dim** from the normalizer mean shape. Pre-v24 policies (78-dim obs) work in the new 114-dim env via `obs[:78]` slicing. See `scripts/watch_demo_jax.py:main()`.
 
-## Files at a glance
+## Files at a glance (post-2026-05-13)
 
-| Path | Purpose | Platform |
-|------|---------|----------|
-| `gait/controller.py` | Stateful gait Controller. Closed-form vectorized IK. | both |
-| `gait/__init__.py` | Public API exports (Controller, link lengths, NEUTRAL_POSE, etc.). | both |
-| `simple_gait.py` | Demo viewer — toggle cycles for any cmd slot via Controller. | both |
-| `IK_gait.py` | Sandbox with all overlays + smart-test script (19-phase exercise). | both |
-| `pilot.py` | Keyboard teleop driving the analytical scaffold directly. | both |
-| `pilot_ai.py` | Keyboard teleop driving a trained PPO checkpoint. Hold Shift = run mode (2× speed). | both |
-| `envs/hexapod_env.py` | Cross-platform gym env. SHM-based live-state mirror, drift penalty, contact shaping, foot deviation, no_progress termination, BC `info["bc_target"]` exposure. | both |
-| `train.py` | Cross-platform PPO training. Flags: `--resume`, `--bc-init`, `--log-std-init`. Config knobs: `INITIAL_STAGE`, `SKIP_SCAFFOLD`, `WATCH_LIVE`. | both |
-| `pretrain_bc.py` | Supervised behavioral cloning of scaffold demonstrations. Produces a PPO-compatible policy that mimics the scaffold's joint targets. `--stage`, `--steps`, `--epochs`, `--out` flags. | both |
-| `live_viewer.py` | Reads `hexapod_live_state` shm and renders — pair with `train.py`. macOS needs `mjpython`; Linux uses plain `python`. | both |
-| `bench_n_envs.py` | SubprocVecEnv N_ENVS sweep — finds CPU sweet spot. | both |
-| `watch.py` | Render trained checkpoint with random env-sampled cmds. Settles to neutral first. | both |
-| `watch_demo.py` | Render trained checkpoint through a 23-phase preset cmd script. Settles first. | both |
-| `watch_tiled.py` | N-up grid render of trained checkpoint. | both |
-| `models/phantomx.xml` | MJCF model. Mesh path fixed to `./meshes/phantomx`. | both |
-| `docs/kinematics.md` | IK derivation, leg geometry, MJCF axis conventions. | both |
-| `snapshots/` | Historical versions before refactors (revert points). | both |
+### Active MJX pipeline → `scripts/`
+
+| Path | Purpose |
+|------|---------|
+| `scripts/train_jax_amp.py` | Brax PPO + AMP training. `--partition-disc`, `--knn-k`, `--style-weight`, `--recovery-curriculum` (shelved). |
+| `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
+| `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). |
+| `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
+| `scripts/watch_controller.py` | 8BitDo / Xbox controller-driven inference. Falls back to watch_demo_jax `--interactive` if no controller. |
+| `scripts/record_policy.py` | Offscreen MP4 render of policy + tracking + orbit camera. |
+| `scripts/eval_bc_quick.py` | Quantitative eval — episode reward, tracking, fall rate. |
+| `scripts/demo_phases.py` | Shared 17-phase preset cmd script + interactive tests 1-9. Uses `envs/stance_envelope.py` for height/width cycles. |
+| `scripts/controller_mapping.py` / `calibrate_controller.py` / `test_controller.py` | Bluetooth controller wiring. |
+
+### AMP modules → `amp/`
+
+| Path | Purpose |
+|------|---------|
+| `amp/prior_data.py` | Collect (s_t, s_{t+1}, cmd_t, bin_idx_t) from scaffold rollouts. Saves to npz. |
+| `amp/discriminator.py` | `Discriminator` (vanilla) + `MultiHeadDiscriminator` (v23+ partition). LSGAN loss + gradient penalty. |
+
+### Env modules → `envs/`
+
+| Path | Purpose |
+|------|---------|
+| `envs/hexapod_env_jax.py` | JAX/MJX-native env (functional reset/step). Owner of cmd sampling, reward function, episode termination. |
+| `envs/hexapod_brax_env.py` | Brax `Env` adapter wrapping the JAX env. |
+| `envs/hexapod_amp_env.py` | `HexapodBraxEnv` + AMP style reward via frozen disc. |
+| `envs/hexapod_env.py` | Gym env. Used ONLY for watch / eval / record. Shares obs layout with JAX env. |
+| **`envs/obs_layout.py`** | **SoT**: 114-dim obs schema (joint_pos, joint_vel, imu_quat, imu_gyro, imu_accel, scaffold_hint, phase_sc, cmd, body_linvel, joint_torque, joint_pos_error). |
+| **`envs/stance_envelope.py`** | **SoT**: dh range + dh-conditional dw envelope. |
+| **`envs/cmd_bins.py`** | **SoT**: 150-bin partition for the multi-head discriminator. |
+
+### Gait / kinematics → `gait/`
+
+| Path | Purpose |
+|------|---------|
+| `gait/controller.py` | Numpy gait controller. Normalizes foot z to uniform plane (v21+). |
+| `gait/controller_jax.py` | Pure-JAX port. Calibrates via numpy `Controller` then copies constants. |
+
+### Models → `models/`
+
+| Path | Purpose |
+|------|---------|
+| `models/phantomx_simple_mjx.xml` | MJX training MJCF. Primitive geoms, Euler, feet↔floor only. |
+| `models/phantomx_simple.xml` | Primitive-geom MJCF with full self-collision (RoM derivation). |
+| `models/phantomx.xml` | Mesh-based MJCF (visualization, NOT training). |
+
+### Tools → `tools/`
+
+| Path | Purpose |
+|------|---------|
+| `tools/watch_scaffold.py` | Render scaffold gait directly via `Controller.predict()`. `--interactive` mode for stance tuning (keys 1-6). Uses `envs/stance_envelope.py` for height presets. |
+| `tools/analyze_cmd_distances.py` | Diagnostic: K-NN structure of priors in cmd space. Was used to design the 150-bin partition. |
+| `tools/to_parallel_sweep.py` | TO sweep harness — parallel solve of many cost-weight / gait-param variations. |
+| `tools/to_solver.py` / `tools/trajectory_opt_demo.py` | CasADi+IPOPT TO solver. Supports `linear_solver=ma27` via `tools/_hsl_bootstrap.py`. |
+| `tools/bench_hsl.py` | MUMPS vs MA27 benchmark on representative TO problem (MA27 is worse for our problem; stay on MUMPS). |
+| `tools/derive_joint_limits.py` / `tools/apply_joint_limits.py` | Auto-derive joint RoM + patch into MJCFs. |
+| `tools/calibrate_scaffold_speed.py` | 49-combo `(period, path_radius)` sweep under physics. |
+
+### Legacy / standalone
+
+- `legacy/sb3/` — old SubprocVecEnv stack (kept for Mac-side use).
+- `legacy/sandboxes/` — old visualizer experiments.
+- `vendor/coinhsl/` — HSL Archive (gitignored, per-user STFC license).
+
+### Docs / data
+
+`docs/` (kinematics, papers, MAX_SPEED analysis), `research/notes/` (hyperresearch vault), `checkpoints/` (run artifacts), `logs/` (active tensorboard + stdout subdirs), `legacy/logs/` (archived runs), `snapshots/`, `media/recordings/`, `joint_limits.json`.
+
+## Directory placement conventions
+
+**Where new files go.** Project root is top-level config only (CLAUDE.md, README, requirements, .gitignore, LICENSE, joint_limits.json).
+
+| Kind | Goes in |
+|---|---|
+| Training script | `scripts/train_*.py` or `pretrain_*.py` |
+| Watch / demo / control script | `scripts/watch_*.py`, `scripts/record_*.py`, etc. |
+| One-off diagnostic / measurement tool | `tools/` |
+| Env / sim modules | `envs/` |
+| **Schema/config single source of truth** | `envs/<name>.py` — see SoT pattern above |
+| Gait math / IK | `gait/` |
+| AMP infra | `amp/` |
+| MJCF, meshes, joint config | `models/` |
+| Recorded videos / GIFs / screenshots | `media/recordings/` |
+| Active tensorboard event files | `logs/<run_name>/` |
+| **Old / failed run logs** | `legacy/logs/` (OUT of `logs/` so tensorboard ignores) |
+| stdout `.log` files | `logs/stdout/` |
+| Documentation | `docs/` |
+| Hyperresearch notes | `research/notes/` |
+| Checkpoint dirs | `checkpoints/<run_name>/iter*/final/{params,discriminator}.pkl` |
+| HSL / third-party binaries (gitignored) | `vendor/` |
+
+**Never put in root**: recorded videos, tensorboard runs, one-off test scripts, temporary `.log` files, generated artifacts.
 
 ## Working-style preferences (apply to all conversations)
 
-**One question at a time.** When you have multiple design questions
-for the user, ask ONE AT A TIME and wait for the answer before asking
-the next. Do not send numbered lists of questions. The user explicitly
-stated this is "by far my most preferred method." Single-question
-iteration produces better answers and faster decisions than batched
-question lists.
+**One question at a time.** When you have multiple design questions for the user, ask ONE AT A TIME and wait for the answer.
 
-**Trust the user on validation.** When the user reports a feature
-"works perfectly" or "feels right," accept it and move on. Don't
-re-litigate or run more verification than needed.
+**Trust the user on validation.** When the user reports a feature "works" or "feels right," accept it and move on.
 
-**Snapshot before risky refactors.** Before any large-scale rewrite,
-copy the current working file into `snapshots/`. Already-snapshotted
-versions live there as historical references.
+**Bite-sized teaching.** When the user wants to understand something new, present ONE focused idea per reply, define acronyms inline (e.g., "PPO = Proximal Policy Optimization"), and pause for confirmation before continuing.
 
-**No-redundant-IK rule for the env hot path.** `HexapodEnv.step` uses
-`Controller.predict_with_feet(cmd, t)` which returns BOTH joint targets
-AND body-frame foot positions in a single gait-pipeline pass, then
-caches `feet_body` for `_get_obs()` to read. Don't reintroduce
-separate `predict()` + `compute_foot_targets()` calls in the same
-step — that re-runs the whole gait pipeline twice for no gain.
+**Snapshot before risky refactors.** Copy current working file into `snapshots/` before invasive changes.
+
+**No-redundant-IK rule for env hot paths.** Both gym and JAX env step functions use `predict_with_feet(cmd, t)` which returns BOTH joint targets AND body-frame foot positions in one gait-pipeline pass.
+
+**SoT pattern for cross-file constants/schemas.** If a constant or formula appears in more than one env / script / tool, extract it to a `envs/<name>.py` single-source-of-truth module. See the three existing ones (obs_layout, stance_envelope, cmd_bins).
+
+**Background long training, foreground quick diagnostics.** `Bash` with `run_in_background=true` for any run > 60s. Always `tee` output to `logs/stdout/<run>.log`. Use `ScheduleWakeup` for periodic check-ins on running training.
 
 ## User's machines
 
-The user has three machines, and which one is "primary" depends on the
-session. Most day-to-day development and training happens on the M3 Max
-MacBook Pro — the workstation is for separate sessions when the user is
-at the Windows desktop. The M1 Max Mac Studio is a third machine, less
-commonly used for training.
+### Workstation (Windows 11) — primary for MJX training
 
-### M3 Max MacBook Pro (primary dev + training, current session)
+- **Hardware**: AMD Ryzen 7 7800X3D, 32 GB RAM, RTX 5060 Ti (16 GB VRAM).
+- **Project path**: see "Path note" at top of this file. Project was moved off OneDrive 2026-05-13.
+- **Two Python environments**:
+  - **Windows venv** (`.venv\`): SB3, numpy, mujoco, JAX-CPU, Brax. Hosts watch scripts (uses mujoco.viewer). Run via `.venv\Scripts\python.exe scripts\<file>.py` with `$env:PYTHONPATH="."`.
+  - **WSL venv** (`~/.venv-mjx/` inside Ubuntu WSL2): JAX-CUDA + MJX + Brax. Required for training. Invoke via `wsl bash -lc "cd '/mnt/c/<path>' && PYTHONPATH=. ~/.venv-mjx/bin/python -u scripts/<file>.py"`.
+- **GitHub**: `gh` CLI installed via winget. Repo at github.com/Eth4ck1e/hexapod-ai.
 
-- **Hardware**: Apple M3 Max (up to 16-core CPU, up to 40-core GPU,
-  unified memory ~400 GB/s). Faster than the workstation for the
-  hexapod RL workload by roughly 2× — the unified memory architecture
-  removes the CPU↔RAM bottleneck that bounds `mj_step` throughput on
-  discrete-memory systems. SubprocVecEnv runs scale better here than on
-  the workstation despite the workstation's 96MB L3.
-- **Project path**: `/Users/mitchelltrafford/Documents/hexapod-ai`
-- **Python**: `.venv/` with Python 3.11. Activate via
-  `source .venv/bin/activate`, or call `./.venv/bin/python` directly.
-- **Shell**: zsh.
-- **macOS specifics**: viewer needs `mjpython` for `launch_passive` (see
-  per-platform-split note above).
-- **GPU/MJX potential**: when the user wants to commit to a faster-
-  iteration training stack, MJX (MuJoCo XLA) on JAX-Metal would run
-  physics rollouts on the M3 Max's 40-core GPU. Realistic 50–100×
-  wall-clock speedup over current SubprocVecEnv. Non-trivial port: the
-  gait controller's IK and the env step would have to be rewritten in
-  pure JAX (no Python control flow that depends on values, no NumPy).
-  Status as of 2026-04-27: not started; user is iterating reward
-  shaping first — don't port a moving target.
+### M3 Max MacBook Pro (legacy / SubprocVecEnv only)
 
-### Workstation (Windows 11 desktop)
+JAX-Metal can't run MJX (Cholesky op missing). Mac runs only the legacy SB3 stack at ~9k SPS.
 
-The user's secondary training machine when they're at the Windows
-desktop, with the project at
-`C:\Users\Eth4ck1e\OneDrive\Documents\Hexapod AI Project`.
+### M1 Max Mac Studio — third machine, less commonly used.
 
-- **Hardware**: AMD Ryzen 7 7800X3D (8C/16T, 96 MB L3 V-Cache,
-  AVX-512), 32 GB RAM, RTX 5060 Ti. The 96 MB L3 fits MuJoCo's per-env
-  physics working set; outpaces the M1 Max Studio for SubprocVecEnv
-  runs but is slower than the M3 Max MacBook Pro by roughly 2×.
-- **GPU note**: SB3 PPO on the 5060 Ti is *slower* than CPU PPO on the
-  same machine (~2,750 vs 5,000+ SPS) because the MLP policy is small
-  enough that GPU dispatch overhead dominates gradient compute. Don't
-  set `device="cuda"` for SB3 PPO. The 5060 Ti would only be useful if
-  the user ports to MJX (physics on GPU) — not just the policy.
-- **Python**: `.venv/` with Python 3.11. Activate via
-  `.\.venv\Scripts\Activate.ps1`, or call `.\.venv\Scripts\python.exe`
-  directly. System `python` on PATH is a different interpreter and
-  lacks project deps — always use the venv.
-- **Shell**: Claude defaults to bash (Git for Windows / MSYS), not
-  PowerShell. Unix-style paths reach Windows drives via `/c/...`.
-- **GitHub**: `gh` CLI installed via winget at
-  `C:\Program Files\GitHub CLI\gh.exe`. HTTPS auth through gh; token
-  in the Windows keyring. New shells pick up `gh` on PATH;
-  mid-session shells need the full path. Repo is at
-  github.com/Eth4ck1e/hexapod-ai.
+## AMP background (the foundational paper — see `docs/papers/`)
 
-## Training throughput on the workstation
+The paper "Learning Natural and Robust Hexapod Locomotion" (Chen et al, SJTU) trains a real PhantomX-style hexapod via PPO + AMP. Key ideas:
 
-Optimization history (single-env step rate, headless):
-- Pre-refactor (legacy single-file gait/IK):  ~5,000 SPS
-- Post-refactor with iterative `mj_jac` IK:     ~62 SPS  (massive regression)
-- Closed-form looped IK + vendored meshes:    ~5,200 SPS (recovered)
-- + `predict_with_feet` (no double pipeline): ~5,500 SPS
-- + Vectorized IK + frame transforms:         ~5,375 SPS  (gait math <60 µs/call)
+- **Adversarial Motion Priors** (AMP): a discriminator network learns to distinguish "real motion" (from a prior dataset) from policy output. The discriminator's score becomes a continuous "naturalness reward" that pushes the policy toward the prior's style.
+- **Three-part reward**: task tracking (gaussian on cmd-vs-actual velocity) + style (AMP disc score) + paper penalties.
+- **Trajectory optimization (TO)** generates the prior dataset. We use our scaffold instead — same purpose, different generation method, way more data per cmd region.
+- **Networks**: asymmetric Actor-Critic + memory encoder + state estimator. Their critic gets privileged info (terrain); the actor gets only proprioception. We're starting simpler (symmetric A-C, no memory encoder yet — both in backlog).
 
-End-to-end env step is dominated by `mj_step` + reward construction,
-not gait math, so further gait optimization has diminishing returns.
+**Our diverge from the paper**:
+1. **Partition discriminator** instead of single conditional. The paper's conditional disc still permits cross-cmd blur; our 150-bin partition forces strict same-bin comparison and fixed v22d's "scores well but doesn't walk" failure mode.
+2. **Motor feedback obs** (joint_torque + joint_pos_error). The paper doesn't expose these to the policy; we found they're necessary for the policy to know when feet are loaded — without them, contact-aware rewards are useless and recovery / terrain training is fundamentally limited.
 
-**`N_ENVS = 32` benchmarked as the sweet spot** for this CPU
-(8 physical cores × SMT 2 = 16 logical, but lighter per-step compute
-after the IK refactor leaves enough idle cycles to oversubscribe to
-24-32 envs profitably). Run `python bench_n_envs.py` to re-confirm
-if anything changes about the workload — sweeps 16/20/24/28/32 in
-~5 minutes.
+## Lessons learned (universal RL principles)
 
-**`device="cpu"` for PPO**, always. SB3 warns about GPU for small MLP
-policies and the warning is correct: GPU dispatch overhead dominates
-the small gradient. We measured GPU at ~2,750 SPS vs CPU at ~5,000+
-SPS on this same machine.
+- **Reward hacking is the dominant failure mode.** Every reward function the policy will exploit. v14/v15 (hovering), v22d (recovery training degraded walking), v24 (gameable velocity tracking despite better metrics). Each time the fix was structural (AMP, partition disc, EMA tracking), not penalty tuning.
+- **Metrics can lie.** v22d hit +666 eval, v24 hit +740 — both visually broken. Always watch alongside reading metrics.
+- **PPO at default `log_std` destroys a working BC walker.** Now baked into `pretrain_bc_jax.py`: `log_std=-4.0` (~1° per-joint jitter).
+- **Reward gaussian's exponential falloff is harsh.** Total squared error of 5.0 collapses tracking from ~1.0 to ~0.007.
+- **Same seed → near-identical reward trajectories across env changes.** v20, v21, v22 all followed nearly identical training curves because the seed dominates the trajectory through param space. To get meaningfully different policies, change the seed OR change something that affects the loss landscape (architecture, reward shape).
+- **Spawn-state DR matters.** v10 added joint-angle ±5° and body-z ±10mm at reset; helped generalization without hurting walking.
+- **AMP only earns its keep when scaffold isn't optimal.** On flat ground with no DR, BC seed = scaffold = a local optimum AMP can't improve. AMP's actual value-add appears under terrain / DR / disturbances where the scaffold breaks.
 
-**Live observability** (in `train.py`):
-- `WATCH_LIVE = True` makes env 0 publish `qpos+qvel+sim_time` every
-  step to the `hexapod_live_state` shared-memory region. Run
-  `live_viewer.py` in a separate terminal (`python live_viewer.py` on
-  Linux/Windows; `mjpython live_viewer.py` on macOS) to render. Cost
-  is one numpy copy per env-0 step — negligible, no SubprocVecEnv
-  drag. Always-on safe.
-- `AUTO_TB = True` launches `tensorboard --logdir LOG_DIR` as a child
-  process and (optionally, via `AUTO_OPEN_BROWSER`) opens the URL in
-  the default browser. Killed via `atexit` when training exits.
+## MJX / hardware findings (historical reference)
 
-`logs/` and `checkpoints/` on this box also contain pre-refactor runs
-(`hexapod_stage1`, `_test`, `_v3`, `_long`, plus `ant_vel_cmd`) that
-reference deleted code. All gitignored; safe to delete when
-convenient. The `hexapod_ros/` clone in the project root is similarly
-redundant now that meshes are vendored under `models/meshes/`.
+- **CUDA MJX (5060 Ti via WSL2)**: ~377k SPS on Brax Ant. Real-world end-to-end with our hexapod env + 114-dim obs + partition disc: ~200k it/s.
+- **Mac (JAX-Metal)**: blocked; Cholesky op missing. CPU MJX on M3 Max is 1.8× SPS — not worth it.
+- **Memory pressure on 5060 Ti**: 16 GB VRAM is tight with 114-dim obs + 150-head disc. Constants `NUM_ENVS=2048`, `DISC_BATCH=512`, `N_ENVS_DEMO=2048`. Going larger triggers RESOURCE_EXHAUSTED in the disc gradient penalty.
 
 ## Patterns developed in workstation sessions
 
-- **Smoke-test after env edits**: one-shot
-  `./.venv/Scripts/python.exe -c "..."` that resets and steps the env
-  before declaring a change done. Catches obvious wiring breaks.
-- **Filesystem-based run monitoring**: check `logs/<run>/` and
-  `checkpoints/<run>/` mtimes to confirm a run is alive without
-  poking the running process.
-- **TensorBoard event-file reading**: when the user asks "how's
-  training going?" parse the event file directly via
-  `tensorboard.backend.event_processing.event_accumulator.EventAccumulator`
-  rather than relying on a shareable dashboard. Pulls the same scalars
-  TB shows. Note that `rollout/ep_rew_mean` only updates when episodes
-  terminate; the `EPISODE_MAX_STEPS=2000` truncation in `train.py`
-  keeps that signal fresh even after the policy stops falling.
-- **Training is launched manually by the user** in a separate
-  terminal. Claude's role is env / reward / training-script edits and
-  inspecting on-disk artifacts; don't try to launch long training
-  runs from the Bash tool.
-- **Numerical-equivalence + round-trip validation** on every IK
-  refactor: random cmd → predict → mj_forward → measured foot.
-  Sub-mm error per leg means the refactor preserves correctness;
-  any larger error means a sign/offset bug that won't surface until
-  off-rest poses and is best caught early.
-
-## Training tuning levers (actively iterated)
-
-Things we keep adjusting between training runs as the policy improves.
-All in `envs/hexapod_env.py` and `train.py` — the unified cross-platform
-files. Mac and workstation use the same code, so changes here apply
-everywhere.
-
-### Reward shaping
-
-- **Drift penalty** (`envs/hexapod_env.py:YAW_DRIFT_W` /
-  `PITCH_DRIFT_W` / `ROLL_DRIFT_W`, gated by `YAW_GATE` / `TILT_GATE`).
-  *Linear* penalty on `|actual_wz|`/`|actual_pitch|`/`|actual_roll|`
-  when the corresponding cmd is near zero. Sharper gradient near zero
-  than the squared tracking term — fixed the slow-drift problem where
-  the bot would walk straight-ish but slowly turn or hold a tilt
-  because the squared error was ~0 close to zero. Default 1.0/0.5/0.5
-  weights with 0.05 rad/s and 3° gates. **If the bot looks rigid or
-  refuses to move at all, these are too high — reduce by 50% and
-  retry.** Drift penalty + scaffold-strong training together can
-  produce a "do nothing" policy that aces every reward except actual
-  movement.
-- **Translation magnitude range** (`SPEED_MIN_FRAC=0.4`,
-  `SPEED_MAX_FRAC=0.85`). Was [0, MAX_SPEED] originally; tightened to
-  [40%, 85%] to remove "stand still" episodes (which encourage do-
-  nothing) and "ragged edge" episodes (full-MAX_SPEED is at scaffold
-  capacity, looks ugly). Heading is still random 0-360°.
-- **Per-slot error scales** (`_err_inv_scales`). Each cmd error is
-  divided by the slot's "full deviation" before squaring, so a
-  velocity error and a pitch error contribute commensurately to the
-  gaussian tracking reward. Without this, big-magnitude slots
-  dominate and small-magnitude slots provide no signal.
-- **Body angular-velocity penalty** (`ANGVEL_W=0.02`). Damps wobble in
-  pitch/roll rates that don't show up cleanly in absolute pose
-  tracking. If walking gait inherently produces >3° pitch oscillation,
-  this fights legitimate motion — reduce it.
-
-### Curriculum schedule
-
-- **Stage masking is per-skill, not all-at-once.** Adding many cmd
-  slots simultaneously in stage 1 (full overlays at once) produced
-  worse results than the per-stage progression. Current
-  `STAGE_CMD_MASK[1] = [1,1,0,0,0,0,0,0,0]` — translation only — with
-  drift penalty implicitly training "stay straight + stay level +
-  don't bounce." Add wz / height / width / pitch / roll one (or a
-  small group) per future stage. Don't go back to all-at-once unless
-  you have a plan for the "do nothing" trap.
-- **Schedule constants** in `train.py`: `STAGE_MIN_STEPS[i]` controls
-  per-stage fade-progress denominator; `STAGE_FADE_RANGE` controls
-  when within the stage the fade happens. Recent successful pattern
-  for short single-stage runs: 8M scaffold-strong / 4M fade / 13M
-  autonomous = 25M total.
-- **Per-stage `gait_scale` envelope**: short single-stage refinement
-  runs use `STAGE_GAIT_SCALE[1] = (1.0, 0.0)` (full fade within the
-  single stage); the original multi-stage curriculum uses
-  `(1.0, 1.0) → (1.0, 0.6) → (0.6, 0.0) → (0.0, 0.0)` across stages
-  1-4. Pick whichever matches your run's `INITIAL_STAGE` /
-  `SKIP_SCAFFOLD` configuration.
-
-### Auto-stop and resume
-
-- **`EARLY_STOP_*`** in `train.py` — only active in autonomous phase
-  (gait_scale == 0.0). Halts training when rolling tracking reward
-  plateaus (no improvement > 0.005 over 3M steps, after a 3M warmup,
-  with min reward 0.5). Saves wall time when the policy has converged
-  before TOTAL_STEPS.
-- **`python train.py --resume`** — load latest checkpoint from
-  `CKPT_DIR` and continue training. Resume mode forces gait_scale=0.0
-  throughout (no scaffold replay) and gives a fresh early-stop warmup
-  window. Use this for quick fine-tunes after small reward / sampling
-  changes — much faster than re-running from scratch. Pass an explicit
-  path with `--resume <path-without-.zip>` to fine-tune from a
-  specific older checkpoint.
-- **`python train.py --bc-init <path>`** — initialize from a BC-
-  pretrained policy. Resets `log_std` to a safer default (-2.0); for
-  refinement runs override with `--log-std-init -3.0` (see Phase 2
-  noise calibration below).
-
-## Lessons learned about RL training (collected over Mac iteration)
-
-These are failure modes we've actually hit, and what we learned from
-each. Worth re-reading before launching a new training run.
-
-- **"Do nothing" policy.** Drift penalty + many "stand still" episodes
-  + scaffold doing the walking → policy converges on zero residual,
-  which costs nothing in drift_pen and tracks well during scaffold-
-  strong phase. Once scaffold fades, bot just stands. Mitigation:
-  remove stand-still episodes from sampling distribution (clamp speed
-  away from 0); reduce drift penalty weights; lengthen autonomous
-  phase so policy has time to discover non-zero residuals.
-- **"Ragged edge" gait.** Full MAX_SPEED commands sit at scaffold
-  stride capacity — any extra residual destabilizes. Mitigation: clamp
-  upper end of speed sampling (e.g., 85% MAX_SPEED) so scaffold has
-  headroom; residuals can refine without fighting saturation.
-- **Spawn-state matters for evaluation.** Eval scripts that don't
-  settle the bot before showing it produce "looks weird from the
-  start" perception. All eval scripts (`watch.py`, `watch_demo.py`,
-  `pilot_ai.py`) now run a 200-step settling loop with cmd=0 before
-  starting the real evaluation. Do not remove this.
-- **Cmd-distribution overfit.** Policy trained on translation-only
-  doesn't know what to do with wz/pitch/roll commands. `watch_demo.py`
-  cycles through ALL phases including the untrained ones — bot may
-  ignore those phases or wobble. Not a bug. Confirm trained skills
-  work in the relevant phases; expect untrained ones to look weird.
-- **Autonomous phase is where the actual learning happens.** During
-  scaffold-strong, the residual barely matters because the scaffold
-  output dominates. Most of the policy's "skill" is acquired during
-  the fade and autonomous phases. Front-loading the fade (start fading
-  at e.g. 8M instead of waiting for 40M like the original schedule)
-  compresses training time substantially when the scaffold already
-  walks well.
-- **Progress signals to watch in TensorBoard**: `stage/avg_tracking`
-  (target ≥ 0.65), `stage/fall_rate` (target ≤ 0.30),
-  `stage/no_progress_rate` (truth-teller for "is bot actually walking"
-  — added 2026-04-28), `stage/fail_rate` (= fell ∪ no_progress),
-  `stage/mean_ep_length` (target → 2000 = max), `rollout/ep_rew_mean`
-  (overall progress curve), `train/std` ("is the policy converging?"
-  — should slowly decrease). Reward dipping when scaffold fades is
-  fine if it recovers within the autonomous phase. Dipping and not
-  recovering means scaffold was carrying everything and policy didn't
-  learn.
-
-## Multi-method training pipeline (planned 2026-04-29)
-
-The project's training methodology evolved from "pure PPO with curriculum
-fade" to a staged hybrid pipeline. Each phase uses the most-appropriate
-method for its specific goal; advance only when the current axis is
-"good enough."
-
-| Phase | Method | Goal | Status |
-|---|---|---|---|
-| 0 | BC pretraining (`pretrain_bc.py`) | Bootstrap a working walker via supervised learning on scaffold demos | DONE — BC v2 |
-| 1 | DAgger (script not yet built) | Refine BC into a flawless mimic — close covariate-shift gap | DEFERRED |
-| 2 | Small-noise PPO (`train.py --bc-init … --log-std-init -3.0`) | Refine reward-coded axes (foot dev, sliding) past scaffold quality | CURRENT |
-| 3 | Domain randomization (env modifications + RL or DAgger) | Sim-to-real robustness | not started |
-| 4 | Distillation (script TBD) | Compress to small net for ESP32-S3 | not started |
-
-**Phase 2 noise calibration matters a lot.** PPO's stochastic noise is
-both required (gradient computation) and dangerous (destabilizes a
-working walker). With a BC-initialized policy:
-- `log_std=0.0` (default; std=1.0): random actions, bot falls instantly.
-- `log_std=-2.0` (std≈0.135): too noisy for refinement; v6 run ended
-  worse than BC v2.
-- `log_std=-3.0` (std≈0.05): refinement zone, ~2.3° per-joint jitter.
-  Recommended starting point for refinement runs.
-- `log_std=-3.5` (std≈0.03): polish, ~1.4° per-joint jitter.
-- Going below -4.0 starves PPO of gradient signal.
-
-Always launch BC-init runs with `--log-std-init -3.0` or lower when
-the goal is refinement (not from-scratch learning). The `--bc-init`
-flag defaults to `log_std=-2.0` for safety, but for an already-working
-walker you almost always want lower.
-
-**DAgger sketch (when it gets built).** New script `dagger_train.py`
-(~150 LOC), reuses `pretrain_bc.train_bc` and the env's
-`info["bc_target"]` per step. Loop:
-1. Drive bot at gait_scale=0.0 with current policy (deterministic).
-2. Collect (obs, scaffold's-action-at-this-state) pairs each step.
-3. Aggregate with original BC dataset.
-4. Retrain policy on augmented data.
-5. Repeat 3-5 times.
-
-No noise, no exploration, no PPO — pure supervised learning on the
-policy's own state distribution. Best tool for "make BC v2 a flawless
-mimic." Cannot exceed scaffold quality (DAgger's ceiling).
-
-## MJX exploration findings
-
-### Mac investigation (2026-04-29)
-
-User benchmarked Brax PPO on Ant to evaluate JAX-Metal speedup before
-committing to a hexapod MJX port.
-
-**Verdict on Apple Silicon GPU + MJX:** **blocked**. `jax-metal` v0.1.1
-(latest, last release Oct 2024) doesn't implement the Cholesky
-decomposition op (`mhlo.cholesky`). MJX's smooth-dynamics solver calls
-`jax.scipy.linalg.cho_factor` on the mass matrix every step, so MJX
-cannot run on Apple Silicon GPU at all today.
-
-**CPU MJX on M3 Max:** ~9,000 steps/sec with 2048 vmap'd envs (Brax
-PPO on Ant). Compared to SubprocVecEnv ~5,000 steps/sec, that's only
-~1.8× speedup. Not worth porting on Mac alone.
-
-### Workstation investigation (2026-04-30)
-
-Set up Ubuntu 24.04 inside WSL2 on the Windows workstation, installed
-`jax[cuda12] mujoco mujoco-mjx brax` in `~/.venv-mjx/`. WSL exposes
-the host's NVIDIA driver via `/dev/dxg`; JAX detects the 5060 Ti as
-`CudaDevice(id=0)`. Same Brax Ant benchmark (4096 vmap'd envs):
-
-| Backend | Total throughput | Speedup vs SubprocVecEnv |
-|---|---|---|
-| SubprocVecEnv (current hexapod, N_ENVS=32) | ~5,400 SPS | 1.0× (baseline) |
-| **CPU MJX** (Ryzen 7800X3D)                | **18,016 SPS** | 3.3× |
-| **CUDA MJX** (RTX 5060 Ti via WSL2)        | **377,521 SPS** | **~70×** |
-
-Confirms the original prediction (100k–500k SPS expected). The 7800X3D's
-L3 + AVX-512 also doubles CPU MJX over the M3 Max — so even the CPU
-fallback is ~3× SubprocVecEnv on this box.
-
-**Decision: port the hexapod stack to MJX.** The 60× wall-clock speedup
-is large enough to fundamentally change the iteration cycle (5-hour
-training runs become ~5–10 minutes, enabling rapid reward / curriculum
-experimentation). Plan in next section.
-
-WSL benchmark script lives at `~/mjx_bench/ant_bench.py` (inside WSL,
-not in the project tree); reusable for re-benchmarking after the port.
-
-## MJX port plan (2026-04-30)
-
-Goal: replace the SubprocVecEnv training stack with a JAX-native one
-that runs on the 5060 Ti via WSL2. Target throughput: 150k–300k SPS for
-the hexapod (slightly slower than Brax Ant's 378k due to 18 DOF + more
-contacts vs Ant's 8 DOF). All current capability — closed-form IK,
-overlays, BC infrastructure, curriculum — to be preserved.
-
-### Phase 1 — Simplified MJCF (`models/phantomx_simple.xml`)
-
-Replace mesh geoms with primitive geoms. **The meshes were never load-
-bearing for physics** — they only provided collision shapes that we
-can specify more cheaply with primitives, and visual appearance which
-training doesn't care about. MJX strongly prefers primitives (mesh
-collision is hard to JIT efficiently and limits parallelism).
-
-Replacements:
-- **Body**: box geom, dimensions matching the chassis bounding-box
-  (~0.27 × 0.23 × 0.04 m). Mass + inertia stays as currently specified.
-- **Coxa, femur**: capsule geoms along the link's length axis.
-- **Tibia**: capsule geom + small sphere at the foot tip.
-- **Joint axes, ranges, kp/kv, masses, inertias**: all unchanged.
-- Visual meshes can stay as `contype=0 conaffinity=0` non-collision
-  geoms (purely decorative) OR be removed entirely.
-
-The closed-form IK only uses link lengths and the foot-tip position;
-both are now explicit constants in the new model rather than empirical
-values derived from mesh vertices. `FOOT_TIP_LOCAL` becomes
-`(0, 0, -tibia_length)` exactly — cleaner than the current empirical
-`(0.134, 0.031, 0.0)` from mesh vertex search.
-
-Validation: run `IK_gait.py` against the new model — sub-mm round-trip
-error should hold. The user's insight here is correct: physics cares
-about geometry constraints (collision shapes, joint limits, masses),
-not visual fidelity. The "meat on the wireframe" framing is the right
-mental model.
-
-### Phase 2 — Pure-JAX gait controller (`gait/controller_jax.py`)
-
-Port `gait/controller.py` to JAX. Most of it translates near-1:1 since
-the IK is already vectorized over `(6, *)` arrays:
-
-- `numpy` → `jax.numpy`; `math.atan2` → `jnp.arctan2`; etc.
-- Pre-compute all per-leg constants (yaw cos/sin, body origin in coxa
-  frame, joint signs, leg path table) at controller construction; pass
-  as `static_argnums` or fold into closure for `@jax.jit`.
-- Replace `if/else` on cmd values with `jnp.where` or `jax.lax.cond`.
-- The path-lookup `LEG_PATH_DELTAS[arange(6), n_idx]` advanced indexing
-  is JAX-compatible; same logic ports directly.
-- `set_cmd` / stateful `step(dt)` API replaced by purely functional
-  `predict_with_feet(cmd, t)` (already exists; just needs JIT).
-
-Validation: random cmd → both controllers → `max(abs(jax_out -
-np_out)) < 1e-6`. Run on 1000 random cmds.
-
-### Phase 3 — JAX-native env (`envs/hexapod_env_jax.py`)
-
-Brax-style functional environment:
-
-```python
-state = env.reset(key)                  # PRNGKey → State (NamedTuple)
-state = env.step(state, action)         # functional update
-```
-
-State carries qpos/qvel/sim_time/cmd/last_action/etc. as `jnp.ndarray`
-fields. Reward and termination computed in pure JAX. Compatible with
-Brax's PPO trainer out of the box.
-
-The `live_watch` SHM observability path doesn't apply to MJX (training
-runs entirely on GPU; there's no per-worker subprocess to publish
-from). Live-watching during training will work differently: a separate
-host process samples N_envs[0]'s qpos at, say, 30 Hz from device memory
-via `state.qpos.block_until_ready()` + `np.asarray(...)`. Or just use
-periodic checkpoint dumps + `watch.py` like before.
-
-### Phase 4 — Training pipeline (`train_jax.py`)
-
-Use Brax's PPO trainer (`brax.training.agents.ppo`). It's JAX-native,
-runs entirely on the GPU, takes a Brax-style env. Curriculum
-(`StageManagerCallback`-equivalent) needs porting to a JAX-friendly
-training-step hook. BC pretraining (`pretrain_bc.py`) needs adapting
-to produce Brax-compatible policy weights — this is the gnarliest
-piece, may delay until after we validate the basic training loop works.
-
-### Phase 5 — Validation
-
-- Benchmark hexapod stepping on CUDA: target ≥150k SPS at N_envs=4096.
-- Short training run (1-2M steps) on JAX, compare reward curve to a
-  matched SubprocVecEnv run. Reward signals should be statistically
-  equivalent (within stochastic noise).
-- If CUDA throughput is good but training behavior diverges from
-  SubprocVecEnv significantly, suspect numerical-precision drift from
-  fp32 (vs SubprocVecEnv's fp64 by default in MuJoCo).
-
-### Effort estimate
-
-Phase 1 + 2: half a day each (clean ports of well-tested code).
-Phase 3 + 4: 1-2 days each (more design surface, integration with
-Brax's training APIs, BC re-targeting).
-Phase 5: ongoing.
-
-**Sequencing decision**: if the user wants to validate the model
-simplification + JAX IK fast before committing to the env/training port,
-phases 1-2 alone produce a useful intermediate state — the simplified
-MJCF + JAX gait controller could be benchmarked against the existing
-MJCF + SubprocVecEnv to confirm "the simple model walks the same."
-That's a low-risk go/no-go gate before phase 3.
+- **Smoke-test after env edits**: one-shot `python -c "..."` that resets and steps the env before declaring a change done.
+- **Filesystem-based run monitoring**: check `checkpoints/<run>/iter*/` mtimes to confirm a run is alive.
+- **Always launch long training via WSL with `python -u` and `tee`** to a stdout log; check on it with `ScheduleWakeup`.
+- **`HexapodAMPEnv` constructor must be called from inside the segment loop** each iteration with the updated discriminator params — that's how the disc-updates propagate to the next PPO segment.
+- **Numerical-equivalence + round-trip validation** on every IK refactor: random cmd → predict → mj_forward → measured foot. Sub-mm error means correctness preserved.
 
 ## Memory / sync
 
-This file is the shared context. The local `.claude/memory/` directory
-holds machine-local memory (auto-managed by Claude Code) which is more
-detailed but does NOT travel with the repo. Major decisions captured
-there are summarized above; refer to that directory for finer-grained
-notes if available.
+This file is the shared context. The local `.claude/memory/` directory holds machine-local memory which is more detailed but does NOT travel with the repo.
+
+<!-- hyperresearch:start -->
+## Research Base (hyperresearch)
+
+**CLI path: `<project_root>/.venv/Scripts/hyperresearch.exe`** — substitute the actual absolute path at invocation. Was previously hardcoded to OneDrive location; now generic so the directory move doesn't break it. May not be on system PATH.
+
+**Paths in this document are relative to your current working directory**, not to the CLI binary's location. Use `research/notes/final_report_<vault_tag>.md` when you save files.
+
+This project uses hyperresearch as an agent-driven research knowledge base. The `research/` directory contains markdown notes collected from web sources and original research. Append `--json` to any command for structured output.
+
+### How to do research
+
+**Run a research session with `/hyperresearch <query>`.** This invokes the V8 16-step pipeline. The entry skill at `.claude/skills/hyperresearch/SKILL.md` is a thin ROUTER. Step procedures live in their own skills (`hyperresearch-1-decompose` through `hyperresearch-16-readability-audit`) and are loaded fresh into context via the `Skill` tool when each step runs.
+
+Step 1 classifies the query into one of two tiers (`light` or `full`) and the pipeline scales accordingly — short bounded queries skip depth investigations / critics / patcher (~30-40 min); argumentative deep-research queries run all 16 steps with adversarial review (~1.5-2.5 hours).
+
+**Do NOT use WebFetch for source pages** — use `hyperresearch.exe fetch` instead. The skill files explain when to fetch vs. search.
+
+### Academic APIs before web search
+
+For any topic with a research literature, hit academic APIs BEFORE web searches:
+
+- **Semantic Scholar:** `https://api.semanticscholar.org/graph/v1/paper/search?query=<q>&fields=title,year,citationCount,externalIds&limit=10`
+- **arXiv:** `https://export.arxiv.org/api/query?search_query=cat:cs.LG+AND+all:<q>&sortBy=relevance&max_results=25`
+- **OpenAlex:** `https://api.openalex.org/works?search=<q>&sort=cited_by_count:desc&per-page=15&mailto=research@example.com`
+- **PubMed:** `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=<q>&retmode=json&retmax=20`
+
+After the academic sweep, run web searches for context + at least one adversarial search.
+
+### PDFs fetch directly
+
+`hyperresearch.exe fetch` auto-detects PDF URLs (arXiv, NBER, SSRN, direct `.pdf`) and extracts full text via pymupdf. Raw PDFs land in `research/raw/<note-id>.pdf` and the note's frontmatter links back via `raw_file:`.
+
+### Searching the vault
+
+```bash
+hyperresearch.exe search "query" --json                 # Full-text search
+hyperresearch.exe search "query" --tag ml --json        # Filter by tag / status
+hyperresearch.exe search "query" --include-body --json  # Full-body search
+hyperresearch.exe note show <id> --json                 # Read one note
+hyperresearch.exe note show <id1> <id2> --json          # Batch-read
+hyperresearch.exe note list --json                      # List all notes
+hyperresearch.exe tags --json                           # Tag vocabulary
+```
+
+### Authenticated crawling
+
+Login-gated content needs a browser profile. Set up once via `hyperresearch.exe setup` or `crwl profiles`. Config in `.hyperresearch/config.toml` under `[web]`: `profile = "research"`, `magic = true`.
+
+### Curate after every session
+
+```bash
+hyperresearch.exe note list --status draft -j
+hyperresearch.exe note show <id> -j
+hyperresearch.exe note update <id> --summary "<specific summary>" --add-tag <t> -j
+hyperresearch.exe lint -j
+hyperresearch.exe repair -j
+hyperresearch.exe status -j
+```
+
+Lifecycle: `draft` → `review` → `evergreen` (or `stale` → `deprecated` → `archive` for outdated).
+
+### Key conventions
+
+- Notes live in `research/notes/` as markdown with YAML frontmatter
+- Link notes with `[[note-id]]` syntax
+- After editing `.md` files directly, run `hyperresearch.exe sync` to update the index
+<!-- hyperresearch:end -->

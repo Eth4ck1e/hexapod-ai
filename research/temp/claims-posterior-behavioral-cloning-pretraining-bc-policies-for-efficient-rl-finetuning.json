@@ -1,0 +1,44 @@
+[
+  {
+    "claim": "Standard behavioral cloning (BC) can provably fail to cover the demonstrator's action distribution, which is a necessary condition for effective RL finetuning in low-data-density regions.",
+    "stance": "supports",
+    "stance_target": "BC pretraining creates suboptimal RL finetuning initializations",
+    "evidence_type": "theoretical",
+    "scope_conditions": "General robotic policy pretraining; proven via formal analysis",
+    "quoted_support": "Standard behavioral cloning (Bc)—which trains a policy to directly match the actions played by the demonstrator—can fail to ensure coverage over the demonstrator's actions, a minimal condition necessary for effective RL finetuning.",
+    "numbers": ["4 parallel environments (DSRL finetuning)", "2,000,000 total gradient steps (RL finetuning on Robomimic)", "5 seeds averaged per experiment"],
+    "entities": ["PostBC", "Posterior Behavioral Cloning", "Robomimic", "Libero", "DSRL", "UC Berkeley", "Stanford"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "posterior-behavioral-cloning-pretraining-bc-policies-for-efficient-rl-finetuning"
+  },
+  {
+    "claim": "PostBC trains a diffusion-model policy to fit the posterior distribution of demonstrator behavior, achieving demonstrator action coverage while incurring no pretrained performance penalty vs standard BC.",
+    "stance": "supports",
+    "stance_target": "Posterior BC pretraining enables more efficient RL finetuning than standard BC",
+    "evidence_type": "theoretical",
+    "scope_conditions": "Manipulation tasks (Robomimic Lift/Can/Square, Libero); diffusion-model policy parameterization",
+    "quoted_support": "PostBC does cover the demonstrator's distribution, incurs no suboptimality in the performance of the pretrained policy as compared to the standard Bc policy, and achieves a near-optimal sampling cost out of all policy estimators which have pretrained performance no worse than the Bc policy's.",
+    "numbers": ["5-30 trajectories BC pretraining dataset (Robomimic)", "100 train denoising steps", "2,000,000 RL finetuning gradient steps"],
+    "entities": ["PostBC", "diffusion policy", "DSRL", "Robomimic"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "posterior-behavioral-cloning-pretraining-bc-policies-for-efficient-rl-finetuning"
+  },
+  {
+    "claim": "This paper addresses manipulation tasks exclusively (Robomimic, Libero) and provides no locomotion-specific training budgets; its relevance to locomotion is limited to the general principle that pretraining quality affects RL finetuning sample efficiency.",
+    "stance": "neutral",
+    "stance_target": "Applicability of PostBC findings to locomotion training budgets",
+    "evidence_type": "empirical",
+    "scope_conditions": "Robotic manipulation; small dataset regime (5-300 demonstrations); diffusion policy architecture",
+    "quoted_support": "We demonstrate experimentally that PostBc pretraining can lead to significant performance gains in terms of the efficiency and effectiveness of RL finetuning, as compared to running RL finetuning on a policy pretrained with standard Bc.",
+    "numbers": ["4 parallel environments", "2,000,000 gradient steps RL finetuning", "5 seeds"],
+    "entities": ["Robomimic", "Libero", "DSRL", "PostBC"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "posterior-behavioral-cloning-pretraining-bc-policies-for-efficient-rl-finetuning"
+  }
+]

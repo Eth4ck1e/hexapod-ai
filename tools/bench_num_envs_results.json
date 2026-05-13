@@ -1,0 +1,89 @@
+{
+  "sweep_started_utc": "2026-05-06T06:46:42.560483Z",
+  "saved_utc": "2026-05-06T06:53:42.474168Z",
+  "host": "Mitch-Workstation",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "candidates": [
+    2048,
+    4096,
+    8192,
+    16384
+  ],
+  "config": {
+    "timeout_s": 360,
+    "num_timesteps_cap": 200000000,
+    "training_metrics_steps": 400000,
+    "warmup_callbacks": 2,
+    "measure_callbacks": 5
+  },
+  "results": [
+    {
+      "ok": true,
+      "num_envs": 2048,
+      "batch_size": 256,
+      "num_minibatches": 8,
+      "unroll_length": 20,
+      "warmup_callbacks": 2,
+      "measure_callbacks": 5,
+      "window_steps": 1638400,
+      "window_wall_s": 12.548554217999992,
+      "steady_sps": 130564.84209550083,
+      "total_wall_s": 96.17669680099999,
+      "total_steps_to_finish": 2457600,
+      "timed_out": false,
+      "controller_wall_s": 94.37902680004481,
+      "worker_exit_code": 0
+    },
+    {
+      "ok": true,
+      "num_envs": 4096,
+      "batch_size": 512,
+      "num_minibatches": 8,
+      "unroll_length": 20,
+      "warmup_callbacks": 2,
+      "measure_callbacks": 5,
+      "window_steps": 1638400,
+      "window_wall_s": 7.779071884000018,
+      "steady_sps": 210616.3851461327,
+      "total_wall_s": 88.50835991599996,
+      "total_steps_to_finish": 2457600,
+      "timed_out": false,
+      "controller_wall_s": 86.80773500003852,
+      "worker_exit_code": 0
+    },
+    {
+      "ok": true,
+      "num_envs": 8192,
+      "batch_size": 1024,
+      "num_minibatches": 8,
+      "unroll_length": 20,
+      "warmup_callbacks": 2,
+      "measure_callbacks": 5,
+      "window_steps": 1966080,
+      "window_wall_s": 7.396548387999928,
+      "steady_sps": 265810.46954140725,
+      "total_wall_s": 115.226787769,
+      "total_steps_to_finish": 2949120,
+      "timed_out": false,
+      "controller_wall_s": 112.7013685000129,
+      "worker_exit_code": 0
+    },
+    {
+      "ok": true,
+      "num_envs": 16384,
+      "batch_size": 2048,
+      "num_minibatches": 8,
+      "unroll_length": 20,
+      "warmup_callbacks": 2,
+      "measure_callbacks": 5,
+      "window_steps": 2621440,
+      "window_wall_s": 10.589010948999999,
+      "steady_sps": 247562.3089470469,
+      "total_wall_s": 127.80777559900002,
+      "total_steps_to_finish": 3932160,
+      "timed_out": false,
+      "controller_wall_s": 124.14638229995035,
+      "worker_exit_code": 0
+    }
+  ]
+}

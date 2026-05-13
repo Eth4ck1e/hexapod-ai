@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "Off-policy residual RL (ResFiT) converges at approximately 200k environment steps on the BoxCleanup manipulation task, versus 40M steps for on-policy PPO residual RL — a ~200x sample efficiency boost — when comparing off-policy vs on-policy approaches.",
+    "stance": "supports",
+    "stance_target": "Off-policy RL dramatically outperforms on-policy PPO in residual finetuning sample efficiency",
+    "evidence_type": "empirical",
+    "scope_conditions": "Manipulation (BoxCleanup task in simulation); residual RL on top of frozen BC policy; NOT a locomotion result",
+    "quoted_support": "our approach converging at 200k steps versus 40M steps, we see a ~200x boost in sample efficiency, demonstrating the need for off-policy approaches when considering performing the RL directly in the real world.",
+    "numbers": ["200k steps (ResFiT convergence)", "40M steps (on-policy PPO residual RL convergence)", "~200x sample efficiency ratio", "~150k steps (simpler Can task, all methods)", "~75k steps (ResFiT on Can task)"],
+    "entities": ["ResFiT", "BoxCleanup", "PPO", "Amazon FAR", "Stanford", "CMU", "Berkeley"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "residual-off-policy-rl-for-finetuning-behavior-cloning-policies"
+  },
+  {
+    "claim": "The 200x sample efficiency claim compares off-policy vs on-policy residual RL variants (both fine-tuning a frozen BC base), NOT a comparison between residual fine-tuning and training from scratch with PPO.",
+    "stance": "neutral",
+    "stance_target": "Correct interpretation of the ~200x sample efficiency figure",
+    "evidence_type": "empirical",
+    "scope_conditions": "BoxCleanup task in simulation; residual correction framework; manipulation domain only",
+    "quoted_support": "we first compare our off-policy residual RL recipe to an existing approach of performing residual RL in sim with the on-policy PPO algorithm.",
+    "numbers": ["200k steps off-policy", "40M steps on-policy PPO residual"],
+    "entities": ["ResFiT", "PPO", "BoxCleanup"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "residual-off-policy-rl-for-finetuning-behavior-cloning-policies"
+  },
+  {
+    "claim": "Real-world RL on a bimanual humanoid with 5-fingered dexterous hands required only 134 rollouts (~15 minutes robot execution) to improve task success from 14% to 64% on a difficult manipulation task.",
+    "stance": "supports",
+    "stance_target": "Off-policy residual RL enables extremely sample-efficient real-world RL",
+    "evidence_type": "empirical",
+    "scope_conditions": "Real-world manipulation (woolly ball grasping); bimanual humanoid platform; sparse binary reward; human-supervised resets",
+    "quoted_support": "With 134 rollouts of autonomous RL execution (≈15 minutes worth of robot execution data) specifically on this woolly ball, ResFiT boosted the performance of the base model from 14% to 64%.",
+    "numbers": ["134 rollouts", "~15 minutes robot execution", "14% baseline success", "64% post-RL success", "343 rollouts for PackageHandover (~76 minutes)"],
+    "entities": ["ResFiT", "humanoid", "Amazon FAR"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "residual-off-policy-rl-for-finetuning-behavior-cloning-policies"
+  },
+  {
+    "claim": "ResFiT treats BC policy as a frozen black-box and learns only single-step residual corrections via off-policy RL, making the approach architecture-agnostic and avoiding the challenge of differentiating through large action-chunked policies.",
+    "stance": "supports",
+    "stance_target": "Residual RL as a practical BC+RL integration strategy",
+    "evidence_type": "empirical",
+    "scope_conditions": "High-DoF systems; action-chunked BC policies; bimanual manipulation up to 870-dimensional action space",
+    "quoted_support": "By treating the base policy as a black box and learning a per-step residual correction that is independent of chunk size and policy parameterization, we sidestep the challenges of directly optimizing huge base policies.",
+    "numbers": ["870 dims action space (bimanual humanoid)", "150k steps convergence for Can/Square tasks"],
+    "entities": ["ResFiT", "action chunking", "residual RL"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "residual-off-policy-rl-for-finetuning-behavior-cloning-policies"
+  },
+  {
+    "claim": "This paper is focused on dexterous manipulation (not locomotion); sample efficiency numbers are for short-horizon manipulation tasks with sparse binary reward, and do not directly translate to locomotion training budgets.",
+    "stance": "neutral",
+    "stance_target": "Applicability of ResFiT sample efficiency results to legged locomotion training",
+    "evidence_type": "empirical",
+    "scope_conditions": "Simulation + real-world bimanual manipulation; 150-250 step episode horizons; vision-based tasks",
+    "quoted_support": "we find that for a task with a horizon length of 150-250 steps, such as [manipulation tasks], [the method converges at 75k-200k steps]",
+    "numbers": ["150-250 step episode horizon", "75k-200k steps convergence"],
+    "entities": ["ResFiT", "BoxCleanup", "Can", "Square", "Coffee", "CanSort"],
+    "time_period": "2025",
+    "region": "Global",
+    "confidence": "high",
+    "source_note_id": "residual-off-policy-rl-for-finetuning-behavior-cloning-policies"
+  }
+]

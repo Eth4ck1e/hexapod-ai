@@ -1,0 +1,25 @@
+{
+  "cfg_id": "looser_pose_0.1x",
+  "overrides": {
+    "w_pose": 500000.0
+  },
+  "status": "Maximum_Iterations_Exceeded",
+  "success": false,
+  "elapsed_s": 6438.086008900078,
+  "err": "",
+  "metrics": {
+    "peak_joint_vel_radps": 7.185645721807531,
+    "max_abs_pitch_deg": 0.4499927287867572,
+    "max_abs_roll_deg": 0.4499843929651287,
+    "body_z_dev_max_m": 0.004668304159070075,
+    "base_y_err_max_mm": 0.9270161533484923,
+    "base_x_err_max_mm": 0.900062500862775,
+    "mean_vx_actual": 0.1700000000024073,
+    "mean_vy_actual": -2.180927323212289e-12,
+    "peak_abs_body_ax_mps2": 2.158046288165083,
+    "peak_abs_body_ay_mps2": 1.8974210920941275,
+    "joint_std_max": 0.4423501753482982,
+    "joint_std_min": 0.03422571161486781
+  },
+  "result_npz": "tools\\sweep_results\\mixed_explore\\looser_pose_0.1x\\result.npz"
+}

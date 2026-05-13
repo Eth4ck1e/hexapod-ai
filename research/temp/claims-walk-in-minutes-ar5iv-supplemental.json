@@ -1,0 +1,58 @@
+[
+  {
+    "claim": "Rudin et al. 2021: uses n_robots=4096, n_steps=24 per policy update, batch_size=98,304 (4096 x 24), 1500 total policy updates = 147,456,000 total environment steps. Trained in <20 minutes on RTX A6000.",
+    "stance": "supports",
+    "stance_target": "~147M steps in <20 minutes is achievable on a single RTX A6000 with 4096 parallel environments",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal C quadruped, rough terrain, Isaac Gym GPU-native simulation, RTX A6000, 2021",
+    "quoted_support": "we use a policy trained with 4096 robots and a batch size of 98304, which we train for 1500 policy updates in under 20 minutes. Trained on: i9-11900k CPU, NVIDIA RTX A6000 GPU.",
+    "numbers": ["4096 robots", "n_steps=24 per update", "batch_size=98304", "1500 policy updates", "147,456,000 total steps", "under 20 minutes", "NVIDIA RTX A6000"],
+    "entities": ["ANYmal C", "ETH Zurich", "NVIDIA", "RTX A6000", "Isaac Gym"],
+    "time_period": "2021",
+    "region": "Switzerland / USA",
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen-3"
+  },
+  {
+    "claim": "Rudin et al. 2021 find the minimum viable rollout length (n_steps) is ~25 consecutive steps (~0.5s simulated time); below this threshold PPO fails to converge due to GAE requiring multi-step reward information.",
+    "stance": "supports",
+    "stance_target": "minimum rollout length for on-policy PPO with GAE in legged locomotion is ~25 steps",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal locomotion, Isaac Gym, PPO+GAE, ablation study over n_steps values",
+    "quoted_support": "we find that the algorithm struggles when we provide fewer than 25 consecutive steps, corresponding to 0.5s of simulated time. This can be explained by the fact that we use Generalized Advantage Estimation (GAE), which requires rewards from multiple time steps to be effective.",
+    "numbers": ["minimum n_steps=25", "0.5s minimum trajectory length", "20s maximum episode length"],
+    "entities": ["Isaac Gym", "ANYmal", "PPO", "GAE"],
+    "time_period": "2021",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen-3"
+  },
+  {
+    "claim": "Rudin et al. 2021: at 4000 robots, training shows nearly linear scaling (more robots = faster convergence); above ~4096-8192 the on-policy algorithm cannot learn effectively because per-robot horizon becomes too short.",
+    "stance": "supports",
+    "stance_target": "optimal num_envs for GPU PPO is roughly 2048-4096; scaling beyond this hurts sample quality",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal, Isaac Gym, ablation of n_robots from 128 to 16384; single GPU; 2021",
+    "quoted_support": "In terms of training time, we see a nearly linear scaling up to 4000 robots, after which simulation throughput gains slow down. As such, we can conclude that increasing the number of robots is beneficial for both final performance and training time, but there is an upper limit on this number after which an on-policy algorithm cannot learn effectively.",
+    "numbers": ["128 to 16384 robots tested", "linear scaling up to 4000 robots", "performance drops above 4096-8192"],
+    "entities": ["Isaac Gym", "ANYmal", "PPO"],
+    "time_period": "2021",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen-3"
+  },
+  {
+    "claim": "Rudin et al. 2021 full curriculum convergence: 1000 iterations reaches hardest terrain levels; full 1500 iterations needed for policy to stabilize at highest performance. Curriculum begins at lowest difficulty and auto-advances.",
+    "stance": "supports",
+    "stance_target": "curriculum training for rough terrain requires ~1000-1500 PPO iterations to reach full convergence",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal C, 4096 robots, rough terrain with 5 terrain types, game-inspired automatic curriculum; RTX A6000",
+    "quoted_support": "after 1000 iterations, the robots have reached the most challenging level for all terrain types and are spread across the map. We train for a total for 1500 iterations to let the policy converge to its highest performance.",
+    "numbers": ["1000 iterations to reach hardest terrain", "1500 total iterations for convergence", "4000 robots shown in figure"],
+    "entities": ["ANYmal", "Isaac Gym", "ETH Zurich"],
+    "time_period": "2021",
+    "region": "Switzerland",
+    "confidence": "high",
+    "source_note_id": "210911978-learning-to-walk-in-minutes-using-massively-parallel-deep-reinforcemen-3"
+  }
+]

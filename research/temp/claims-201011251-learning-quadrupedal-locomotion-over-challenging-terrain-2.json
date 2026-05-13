@@ -1,0 +1,72 @@
+[
+  {
+    "claim": "Lee et al. 2020 train ANYmal locomotion with TRPO using a two-stage teacher-student protocol, requiring approximately 12 hours for the teacher and 4 hours for the student policy on an i7-8700K CPU + RTX 2080 desktop.",
+    "stance": "supports",
+    "stance_target": "pre-GPU-parallelism rough-terrain locomotion required ~16 hours total training on consumer hardware",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped, RaiSim simulator (CPU), teacher-student privileged learning, circa 2020",
+    "quoted_support": "Table S1: Computation time for training. Teacher policy training: approx 12 hrs. Student policy training: approx 4 hrs. The training is conducted on a desktop machine with i7-8700K CPU and a Geforce RTX 2080 GPU.",
+    "numbers": ["~12 hours teacher", "~4 hours student", "~16 hours total", "i7-8700K CPU", "GeForce RTX 2080 GPU"],
+    "entities": ["ANYmal", "ETH Zurich", "RaiSim", "TRPO"],
+    "time_period": "2020",
+    "region": "Switzerland",
+    "confidence": "high",
+    "source_note_id": "201011251-learning-quadrupedal-locomotion-over-challenging-terrain-2"
+  },
+  {
+    "claim": "Lee et al. 2020 Table S7: teacher policy TRPO hyperparams - batch_size=80,000, total_iterations=10,000. Total teacher steps = 10,000 x 80,000 = 800M.",
+    "stance": "neutral",
+    "stance_target": "derived total step counts for Lee 2020 teacher phase",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal quadruped, TRPO algorithm, CPU RaiSim simulator; Table S7; 2020",
+    "quoted_support": "Table S7: Hyperparameters for teacher policy training. Parameter: Value. discount factor: 0.995, KL-d threshold: 0.01, max. episode length: 400, batch size: 80000, total iterations: 10000.",
+    "numbers": ["batch_size=80000", "total_iterations=10000", "800M total teacher steps (derived: 10000 x 80000)"],
+    "entities": ["TRPO", "ANYmal"],
+    "time_period": "2020",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "201011251-learning-quadrupedal-locomotion-over-challenging-terrain-2"
+  },
+  {
+    "claim": "Lee et al. 2020 Table S8: student policy (TCN-N) hyperparams - batch_size=20,000, minibatches=5, epochs=4, total_iterations=4,000. Total student steps = 4,000 x 20,000 = 80M.",
+    "stance": "neutral",
+    "stance_target": "student distillation training budget in Lee 2020",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal student policy (TCN-N architecture), supervised learning from teacher; 2020",
+    "quoted_support": "Table S8: Hyperparameters for student policy training. batch size: 20000, minibatches: 5, epochs: 4, total iteration: 4000.",
+    "numbers": ["batch_size=20000", "minibatches=5", "epochs=4", "total_iterations=4000", "80M student steps (derived)"],
+    "entities": ["ANYmal", "TCN"],
+    "time_period": "2020",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "201011251-learning-quadrupedal-locomotion-over-challenging-terrain-2"
+  },
+  {
+    "claim": "Lee et al. 2020 total combined training is ~880M steps (800M teacher + 80M student) over ~16 hours on a single desktop machine; this is the pre-Isaac-Gym 2020 baseline for challenging terrain ANYmal locomotion.",
+    "stance": "neutral",
+    "stance_target": "total step budget for challenging terrain quadruped RL pre-GPU era",
+    "evidence_type": "empirical",
+    "scope_conditions": "Derived from Tables S7/S8; CPU-based simulator; not directly stated in paper",
+    "quoted_support": "Teacher policy training: approx 12 hrs. Student policy training: approx 4 hrs. batch size 80000 total iterations 10000 [teacher]. batch size 20000 total iteration 4000 [student].",
+    "numbers": ["~800M teacher steps", "~80M student steps", "~880M total steps", "~16 hours total wall clock"],
+    "entities": ["ANYmal", "ETH Zurich"],
+    "time_period": "2020",
+    "region": "Switzerland",
+    "confidence": "medium",
+    "source_note_id": "201011251-learning-quadrupedal-locomotion-over-challenging-terrain-2"
+  },
+  {
+    "claim": "Lee et al. 2020 demonstrate zero-shot generalization from sim-to-real: policy trained only on rigid terrain in simulation successfully handles mud, snow, debris, vegetation, and water in field deployment.",
+    "stance": "supports",
+    "stance_target": "sim-to-real transfer from simple simulated terrain can generalize to complex real-world conditions",
+    "evidence_type": "empirical",
+    "scope_conditions": "ANYmal deployed in multiple natural environments; DARPA SubT competition use",
+    "quoted_support": "the controller successfully handles deformable terrain (mud, moss, snow), dynamic footholds (stepping on a rolling board in a cluttered indoor environment, or debris in the field), and overground impediments such as thick vegetation, rubble, and gushing water.",
+    "numbers": [],
+    "entities": ["ANYmal", "DARPA SubT"],
+    "time_period": "2020",
+    "region": "Switzerland / field sites",
+    "confidence": "high",
+    "source_note_id": "201011251-learning-quadrupedal-locomotion-over-challenging-terrain-2"
+  }
+]

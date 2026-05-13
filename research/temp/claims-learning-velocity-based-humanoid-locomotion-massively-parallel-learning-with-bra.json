@@ -1,0 +1,44 @@
+[
+  {
+    "claim": "Thibault et al. trained a REEM-C humanoid Brax/MJX PPO policy for 200,000,000 steps with 8192 parallel environments, completing in approximately 56 minutes on an RTX 4090.",
+    "stance": "supports",
+    "stance_target": "200M steps is sufficient for humanoid locomotion convergence in Brax/MJX PPO",
+    "evidence_type": "empirical",
+    "scope_conditions": "REEM-C humanoid, 12-DOF legs, MJX simulator, Brax PPO, single RTX 4090, AMD 7950x CPU, 64GB RAM",
+    "quoted_support": "The training is run for 200,000,000 training steps with 8192 parallel environments using PPO. The networks for the PPO algorithm had 4 hidden layers of 128 neurons. This training was performed on a PC with an AMD 7950x CPU, 64 GB RAM, and an RTX 4090 24 GB VRAM and completed training in approximately 56 minutes.",
+    "numbers": ["200,000,000 steps", "8192 parallel environments", "56 minutes wall-clock", "RTX 4090 24GB", "4 hidden layers of 128 neurons"],
+    "entities": ["REEM-C", "Brax", "MJX", "RTX 4090", "AMD 7950x", "CLAWAR 2024"],
+    "time_period": "2024",
+    "region": "Canada (University of Waterloo)",
+    "confidence": "high",
+    "source_note_id": "learning-velocity-based-humanoid-locomotion-massively-parallel-learning-with-bra"
+  },
+  {
+    "claim": "The Brax/MJX humanoid paper reports no BC pretrain or DR finetune stage; it is a single PPO run with domain randomization integrated into the environment.",
+    "stance": "neutral",
+    "stance_target": "stage decomposition in Brax/MJX humanoid training",
+    "evidence_type": "empirical",
+    "scope_conditions": "Single-stage PPO training with optimized robot model (lower body only) and MJX performance tuning",
+    "quoted_support": "Note that to achieve fast and high performance training an optimized model of the robot was used, containing only lower body collisions and recommended MJX performance tuning techniques",
+    "numbers": ["200M steps total"],
+    "entities": [],
+    "time_period": "2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "learning-velocity-based-humanoid-locomotion-massively-parallel-learning-with-bra"
+  },
+  {
+    "claim": "The Brax/MJX humanoid paper is the most directly hardware-comparable to the user's hexapod project: same Brax PPO + MJX stack, similar GPU class (RTX 4090 vs RTX 5060 Ti), similar num_envs=8192.",
+    "stance": "supports",
+    "stance_target": "200M step budget at 8192 envs is a reasonable reference point for the user's hexapod project",
+    "evidence_type": "empirical",
+    "scope_conditions": "Brax PPO, MJX, single consumer GPU",
+    "quoted_support": "The RL algorithms of Brax using the MJX simulator, a version of MuJoCo that supports the XLA compiler for GPU and TPU based simulation using JAX, is used to train the locomotion policy.",
+    "numbers": ["200M steps", "8192 envs", "56 min", "RTX 4090"],
+    "entities": ["Brax", "MJX", "PPO"],
+    "time_period": "2024",
+    "region": null,
+    "confidence": "high",
+    "source_note_id": "learning-velocity-based-humanoid-locomotion-massively-parallel-learning-with-bra"
+  }
+]
