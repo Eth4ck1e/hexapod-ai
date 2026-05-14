@@ -185,8 +185,11 @@ class EnvParams(NamedTuple):
     # which combined with weak AMP signal pushed the policy off scaffold
     # toward degenerate "low-motion" gait. Tracking gaussian still
     # captures velocity errors; we don't need a separate drift term.
-    yaw_drift_w:           float = 0.0     # was 5.0 (v11); 0.5 (v10)
-    vy_drift_w:            float = 0.0     # was 0.5 (v10)
+    # v25c (2026-05-13): re-enabled at much lower weights paired with
+    # style_weight=1.0. Strong AMP signal blocks the v16 "don't move"
+    # degenerate gait that the high-weight versions triggered with weak AMP.
+    yaw_drift_w:           float = 0.1     # was 5.0 (v11); 0.5 (v10); 0.0 (v16)
+    vy_drift_w:            float = 0.05    # was 0.5 (v10); 0.0 (v16)
     # v25 (2026-05-13): EMA-filter motion components of tracking reward to
     # close the "wobble to match instantaneous velocity" gaming exploit.
     # alpha=0.05 at 200Hz → ~20-step (100ms) time constant. Jittering
