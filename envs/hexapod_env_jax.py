@@ -190,6 +190,12 @@ class EnvParams(NamedTuple):
     # degenerate gait that the high-weight versions triggered with weak AMP.
     yaw_drift_w:           float = 0.1     # was 5.0 (v11); 0.5 (v10); 0.0 (v16)
     vy_drift_w:            float = 0.05    # was 0.5 (v10); 0.0 (v16)
+    # v25d (2026-05-13): vx_drift_w added to defeat the "cheat at forward
+    # cmd" failure mode. Bot was matching commanded speed via sideways/yaw
+    # motion. Linear pen on |cmd[0] - vx| forces forward-component matching
+    # at any error magnitude, complementing the joint gaussian (which gives
+    # too little gradient for small deviations).
+    vx_drift_w:            float = 0.1     # NEW v25d
     # v25 (2026-05-13): EMA-filter motion components of tracking reward to
     # close the "wobble to match instantaneous velocity" gaming exploit.
     # alpha=0.05 at 200Hz → ~20-step (100ms) time constant. Jittering
@@ -612,6 +618,7 @@ def _compute_reward(params: EnvParams,
     # while still allowing intentional turning (penalty is on (actual - cmd)).
     yaw_drift_pen = params.yaw_drift_w * jnp.abs(state.cmd[2] - wz)
     vy_drift_pen  = params.vy_drift_w  * jnp.abs(state.cmd[1] - vy)
+    vx_drift_pen  = params.vx_drift_w  * jnp.abs(state.cmd[0] - vx)
 
     # Foot-contact stats still computed for state-bookkeeping (observations,
     # terminations downstream) AND now (v25) used for the gait-phase contact
@@ -648,6 +655,7 @@ def _compute_reward(params: EnvParams,
               - foot_force_limit_pen
               - yaw_drift_pen
               - vy_drift_pen
+              - vx_drift_pen
               - contact_mismatch_pen)
 
     metrics = {
@@ -661,6 +669,7 @@ def _compute_reward(params: EnvParams,
         "foot_force_limit_pen":     foot_force_limit_pen,
         "yaw_drift_pen":            yaw_drift_pen,
         "vy_drift_pen":             vy_drift_pen,
+        "vx_drift_pen":             vx_drift_pen,
         "contact_mismatch_pen":     contact_mismatch_pen,
         "n_contact":                n_contact.astype(jnp.float32),
         "short_lifts":              _short_lifts.astype(jnp.float32),
@@ -801,6 +810,7 @@ def reset(params: EnvParams,
         "joint_vel_limit_pen":      zero, "joint_torque_limit_pen":   zero,
         "body_angvel_xy_pen":       zero, "foot_force_limit_pen":     zero,
         "yaw_drift_pen":            zero, "vy_drift_pen":             zero,
+        "vx_drift_pen":             zero,
         "contact_mismatch_pen":     zero,
         # Deprecated keys kept at 0 for log-parser back-compat.
         "angvel_pen":               zero, "drift_pen":                zero,
