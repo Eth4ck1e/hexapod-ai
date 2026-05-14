@@ -830,8 +830,6 @@ class HexapodEnv(gym.Env):
                                        dtype=np.float32),
             cmd             = self._cmd,
             body_linvel     = body_linvel,
-            joint_torque    = self._data.qfrc_actuator[6:24].astype(np.float32),
-            joint_pos_error = (self._data.ctrl[:18] - qpos[7:25]).astype(np.float32),
             concat_fn       = np.concatenate,
         ).astype(np.float32)
 

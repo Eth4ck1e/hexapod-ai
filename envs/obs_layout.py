@@ -26,16 +26,20 @@ OBS_SLOT_DIMS: "OrderedDict[str, int]" = OrderedDict([
     ("phase_sc",         2),     # [sin(2π·phase), cos(2π·phase)]
     ("cmd",              9),     # 9-D cmd vector
     ("body_linvel",      3),     # body-frame linear velocity
-    ("joint_torque",    18),     # qfrc_actuator[6:24] — v24+ motor feedback
-    ("joint_pos_error", 18),     # ctrl[:18] - qpos[7:25] — v24+ motor feedback
+    # v26 (2026-05-13): motor feedback slots (joint_torque, joint_pos_error)
+    # removed. Paper Liu et al. 2511.03167 achieves rough-terrain locomotion
+    # with only proprioception + cmd + prev action + short-term memory
+    # latent; motor torque/position-error are not in their actor obs.
+    # v24's addition correlated with the walking-quality regression and
+    # is reverted here as part of the paper-pure realignment.
 ])
 
-OBS_DIM = sum(OBS_SLOT_DIMS.values())   # currently 114
+OBS_DIM = sum(OBS_SLOT_DIMS.values())   # currently 78
 
 
 def compose_obs(*, joint_pos, joint_vel, imu_quat, imu_gyro, imu_accel,
                 scaffold_hint, phase_sc, cmd, body_linvel,
-                joint_torque, joint_pos_error, concat_fn):
+                concat_fn):
     """Concatenate per-slot signals into the policy obs vector.
 
     Args:
@@ -53,6 +57,4 @@ def compose_obs(*, joint_pos, joint_vel, imu_quat, imu_gyro, imu_accel,
         phase_sc,
         cmd,
         body_linvel,
-        joint_torque,
-        joint_pos_error,
     ])

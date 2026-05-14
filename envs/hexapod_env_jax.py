@@ -152,9 +152,13 @@ class EnvParams(NamedTuple):
     # for the v4 baseline (2026-05-08): we previously over-weighted the
     # penalties by 200-500× which destabilized AMP training at style_weight=1.0.
     # The AMP discriminator's style reward is added separately in HexapodAMPEnv.
-    z_vel_w:               float = 1.0     # paper: 1.0 × v_z^2
-    body_angvel_xy_w:      float = 0.08    # paper: 0.08 × ||ω_xy||^2  (NEW v4)
+    z_vel_w:               float = 1.0     # v26: restored to paper Table I (was 1.5 in v25e)
+    body_angvel_xy_w:      float = 0.08    # v26: restored to paper Table I (was 0.12 in v25e)
     joint_torque_w:        float = 2e-6    # paper: 2e-6 × ||τ||^2
+    # v26: joint acceleration penalty — paper Table I row "Joint acceleration".
+    # We were missing this term entirely. Penalizes ||q̈||² to reduce
+    # twitchy motion and motor stress.
+    joint_accel_w:         float = 1.5e-7
     joint_vel_limit:       float = 6.18    # AX-12A no-load max angular velocity (rad/s)
     joint_vel_limit_w:     float = 0.5     # paper: 0.5 × ||max(|q̇|-q̇_lim,0)||^2
     joint_torque_limit:    float = 1.5     # AX-12A stall torque (N·m)
@@ -188,26 +192,25 @@ class EnvParams(NamedTuple):
     # v25c (2026-05-13): re-enabled at much lower weights paired with
     # style_weight=1.0. Strong AMP signal blocks the v16 "don't move"
     # degenerate gait that the high-weight versions triggered with weak AMP.
-    yaw_drift_w:           float = 0.1     # was 5.0 (v11); 0.5 (v10); 0.0 (v16)
-    vy_drift_w:            float = 0.05    # was 0.5 (v10); 0.0 (v16)
-    # v25d (2026-05-13): vx_drift_w added to defeat the "cheat at forward
-    # cmd" failure mode. Bot was matching commanded speed via sideways/yaw
-    # motion. Linear pen on |cmd[0] - vx| forces forward-component matching
-    # at any error magnitude, complementing the joint gaussian (which gives
-    # too little gradient for small deviations).
-    vx_drift_w:            float = 0.1     # NEW v25d
+    # v26 (2026-05-13): drift pens zeroed in the paper-pure realignment.
+    # Paper (Liu et al. 2511.03167) has no drift penalties; AMP + tracking
+    # exp() handle cmd matching. Our hand-added penalties were fighting
+    # exploits AMP was meant to fix and stacking unnecessary gradients.
+    yaw_drift_w:           float = 0.0     # v26: zeroed (paper has none)
+    vy_drift_w:            float = 0.0     # v26: zeroed (paper has none)
+    vx_drift_w:            float = 0.0     # v26: zeroed (paper has none)
     # v25 (2026-05-13): EMA-filter motion components of tracking reward to
     # close the "wobble to match instantaneous velocity" gaming exploit.
     # alpha=0.05 at 200Hz → ~20-step (100ms) time constant. Jittering
     # averages to ~zero on this window so the policy can't fake velocity
     # tracking via high-frequency motion.
-    linvel_ema_alpha:      float = 0.05
-    # v25: gait-phase contact penalty — uses the bot's now-available motor
-    # feedback to know which legs ARE loaded. Penalizes feet that should
-    # be in stance per the tripod cycle but aren't (and vice versa). Max
-    # mismatch = 6 legs × 1000 steps = 6000 per episode; w=0.02 caps
-    # episodic contribution at ~120 — comparable to other penalty terms.
-    contact_mismatch_w:    float = 0.02
+    # v26: alpha=1.0 disables the EMA (passes instantaneous velocity
+    # through). Paper uses instantaneous tracking; EMA was a hand-added
+    # anti-gaming mechanism that's being unwound here.
+    linvel_ema_alpha:      float = 1.0
+    # v26: contact mismatch zeroed. Paper has no such penalty; AMP
+    # partition disc enforces tripod gait via prior data routing.
+    contact_mismatch_w:    float = 0.0
     # Domain randomization at episode reset (NEW v10). Random perturbations
     # to initial joint angles + body z so the policy sees a broader range
     # of starting states (helps generalize, learn to recover from non-ideal
@@ -569,10 +572,20 @@ def _compute_reward(params: EnvParams,
 
     actual = jnp.array([f_vx, f_vy, f_wz, pitch, roll, height_delta, actual_width_delta, 0.0, 0.0])
 
-    # 1. Task tracking — gaussian on cmd-vs-actual error (motion components
-    # EMA-filtered to defeat the jitter-gaming exploit).
-    err = (state.cmd - actual) * params.err_inv_scales * params.reward_track_mask
-    tracking = jnp.exp(-jnp.dot(err, err))
+    # 1. Task tracking — paper Table I form (Liu et al. 2511.03167):
+    #    r_g = 1.0 * exp(-||v_xy - v_xy_des||² / 0.15²)
+    #        + 0.5 * exp(-||ω_z - ω_z_des||² / 0.15²)
+    # Two independent per-axis exp() terms (linear vel + yaw rate), not
+    # one joint gaussian. Posture cmd components (pitch/roll/dh/dw) are
+    # not tracked here — they're enforced via the AMP partition disc's
+    # cmd-bin routing instead.
+    _SIGMA = 0.15
+    _SIGMA_SQ = _SIGMA * _SIGMA
+    v_err_sq = (state.cmd[0] - f_vx) ** 2 + (state.cmd[1] - f_vy) ** 2
+    w_err_sq = (state.cmd[2] - f_wz) ** 2
+    r_lin_track = 1.0 * jnp.exp(-v_err_sq / _SIGMA_SQ)
+    r_ang_track = 0.5 * jnp.exp(-w_err_sq / _SIGMA_SQ)
+    tracking = r_lin_track + r_ang_track
 
     # 2. Action smoothness — penalize per-step change in action.
     action_delta = action - state.last_action
@@ -590,6 +603,11 @@ def _compute_reward(params: EnvParams,
     # actuator_force has shape (nu,) = (18,) for our 18 actuators (one per joint).
     joint_torques = mjx_data.actuator_force                            # (18,)
     joint_torque_pen = params.joint_torque_w * jnp.dot(joint_torques, joint_torques)
+
+    # 4b. Joint acceleration magnitude — paper Table I "-1.5e-7 × ||q̈||²".
+    # qacc[6:24] is the 18 joint accelerations (after the 6 free-joint DoF).
+    joint_accel = mjx_data.qacc[6:24]                                  # (18,)
+    joint_accel_pen = params.joint_accel_w * jnp.dot(joint_accel, joint_accel)
 
     # 5. Joint velocity limit — deadband+quadratic above 90% of motor max (6.18 rad/s).
     joint_vels = qvel[6:24]                                            # (18,)
@@ -645,11 +663,15 @@ def _compute_reward(params: EnvParams,
     contact_mismatch_pen = (params.contact_mismatch_w
                             * jnp.sum(contact_mismatch.astype(jnp.float32)))
 
+    # v26: paper-pure reward sum (Liu et al. 2511.03167 Table I).
+    # yaw/vx/vy drift pens + contact_mismatch_pen still evaluated (with
+    # weight 0) so the metrics dict stays log-stable across the change.
     reward = (tracking
               - action_rate
               - z_vel_pen
               - body_angvel_xy_pen
               - joint_torque_pen
+              - joint_accel_pen
               - joint_vel_limit_pen
               - joint_torque_limit_pen
               - foot_force_limit_pen
@@ -660,10 +682,13 @@ def _compute_reward(params: EnvParams,
 
     metrics = {
         "tracking_reward":          tracking,
+        "r_lin_track":              r_lin_track,
+        "r_ang_track":              r_ang_track,
         "action_rate_pen":          action_rate,
         "z_vel_pen":                z_vel_pen,
         "body_angvel_xy_pen":       body_angvel_xy_pen,
         "joint_torque_pen":         joint_torque_pen,
+        "joint_accel_pen":          joint_accel_pen,
         "joint_vel_limit_pen":      joint_vel_limit_pen,
         "joint_torque_limit_pen":   joint_torque_limit_pen,
         "foot_force_limit_pen":     foot_force_limit_pen,
@@ -746,8 +771,6 @@ def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint):
                                      jnp.cos(2.0 * jnp.pi * phase)]),
         cmd             = cmd,
         body_linvel     = _body_frame_linvel(qpos, qvel),
-        joint_torque    = mjx_data.qfrc_actuator[6:24],   # AX-12A "present load"
-        joint_pos_error = mjx_data.ctrl[:18] - qpos[7:25],
         concat_fn       = jnp.concatenate,
     )
 
@@ -805,8 +828,10 @@ def reset(params: EnvParams,
     zero = jnp.float32(0.0)
     metrics_zero = {
         "tracking_reward":          zero, "action_rate_pen":          zero,
+        "r_lin_track":              zero, "r_ang_track":              zero,
         # New paper-aligned terms (added 2026-05-07; body_angvel_xy_pen 2026-05-08).
         "z_vel_pen":                zero, "joint_torque_pen":         zero,
+        "joint_accel_pen":          zero,
         "joint_vel_limit_pen":      zero, "joint_torque_limit_pen":   zero,
         "body_angvel_xy_pen":       zero, "foot_force_limit_pen":     zero,
         "yaw_drift_pen":            zero, "vy_drift_pen":             zero,
