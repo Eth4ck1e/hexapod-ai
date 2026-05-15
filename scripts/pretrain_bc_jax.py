@@ -49,14 +49,13 @@ from envs.hexapod_brax_env import HexapodBraxEnv
 # ============================================================================
 # CONFIG
 # ============================================================================
-from chain_train import MODEL_PATH      # one source of truth
+from chain_train import MODEL_PATH, NUM_ENVS      # SoT for paths + VRAM budget
 OUT_DIR       = Path("checkpoints") / "bc_pretrained_jax"
 
 # Demo collection — at 564k SPS this is fast.
-N_ENVS_DEMO   = 2048            # v24+ (2026-05-12): halved 4096→2048 to fit
-                                # the larger 114-dim obs in 16GB VRAM.
-                                # 2048×1500 still gives ~3M demos.
-N_STEPS_DEMO  = 1500            # 2048 × 1500 ≈ 3M demos
+# N_ENVS_DEMO mirrors training's NUM_ENVS (same VRAM budget; see chain_train).
+N_ENVS_DEMO   = NUM_ENVS
+N_STEPS_DEMO  = 1500            # NUM_ENVS × 1500 ≈ 6M demos at NUM_ENVS=4096
 DEMO_GAIT_SCALE = 1.0           # full scaffold drives the bot
 
 # BC training.

@@ -55,7 +55,11 @@ import optax
 from tensorboardX import SummaryWriter
 
 # Enable persistent JAX compile cache before any JAX op runs.
-from chain_train import enable_jax_cache, MODEL_PATH, BASE_NAME, CMD_MASK, ACTION_SPACE
+from chain_train import (
+    enable_jax_cache,
+    MODEL_PATH, BASE_NAME, CMD_MASK, ACTION_SPACE,
+    NUM_ENVS, DISC_BATCH,
+)
 enable_jax_cache()
 
 # JAX 0.10 / Brax 0.14.2 compat shim — same as train_jax.py.
@@ -101,9 +105,8 @@ def _custom_network_factory(observation_size, action_size, preprocess_observatio
 # CONFIG
 # ============================================================================
 RUN_BASE       = f"{BASE_NAME}_amp"
-NUM_ENVS       = 2048   # v24+ (2026-05-12): halved 4096→2048 to fit larger
-                        # 114-dim obs + 150-head disc in 16GB VRAM. Throughput
-                        # drops ~30% but training quality is essentially equal.
+# NUM_ENVS imported from chain_train (SoT). v26 restored to 4096 after
+# reverting obs to 78-dim removed the v24 VRAM pressure.
 EPISODE_LENGTH = 1000
 # v18 (2026-05-10): dropped from 50M to 5M (and the default --segments to 20)
 # so a full run is ~100M steps / ~15 min. Iteration speed matters more than
@@ -123,9 +126,7 @@ STYLE_WEIGHT   = 0.5          # λ_style — weight on AMP reward in env
 # trade ~5 sec/segment for slightly weaker disc per cycle. Net win when
 # segments are short and overhead dominates.
 DISC_LR        = 1e-4
-DISC_BATCH     = 512          # v24+ (2026-05-12): dropped 1024→512 to avoid OOM
-                              # under the larger obs (114-d) + 150-head disc.
-                              # Disc still trains fine on smaller batches.
+# DISC_BATCH imported from chain_train (SoT). v26 restored to 1024.
 DISC_UPDATES   = 100          # was 200
 DISC_GRAD_PEN  = 10.0
 DISC_HIDDEN    = (1024, 512)

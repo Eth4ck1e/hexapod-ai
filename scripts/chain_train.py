@@ -52,6 +52,16 @@ MODEL_PATH   = "models/phantomx_simple_mjx.xml"
 # RENDER_MODEL_PATH is ONLY for the viewer window (mesh visuals).
 # Set to MODEL_PATH for zero-overhead viewing.
 RENDER_MODEL_PATH = "models/phantomx.xml"
+
+# VRAM-budget knobs (consumed by both train_jax_amp.py and pretrain_bc_jax.py).
+# 16 GB RTX 5060 Ti VRAM was tight during the v24-v25 era with 114-dim obs +
+# 150-head partition disc — those forced NUM_ENVS 4096->2048 and DISC_BATCH
+# 1024->512. v26 reverted obs to 78-dim, so we're back to the pre-v24 budget.
+# Lower these one notch (3072 / 768) if a future change (e.g. larger network)
+# triggers RESOURCE_EXHAUSTED in the disc gradient-penalty kernel.
+NUM_ENVS    = 4096
+DISC_BATCH  = 1024
+
 # Set False to skip per-segment eval globally; also suppressible via --no-eval.
 EVAL_AFTER_SEGMENT = True
 
