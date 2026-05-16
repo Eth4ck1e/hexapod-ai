@@ -572,19 +572,22 @@ def _compute_reward(params: EnvParams,
 
     actual = jnp.array([f_vx, f_vy, f_wz, pitch, roll, height_delta, actual_width_delta, 0.0, 0.0])
 
-    # 1. Task tracking — paper Table I form (Liu et al. 2511.03167):
-    #    r_g = 1.0 * exp(-||v_xy - v_xy_des||² / 0.15²)
-    #        + 0.5 * exp(-||ω_z - ω_z_des||² / 0.15²)
+    # 1. Task tracking — paper Table I form (Liu et al. 2511.03167),
+    # legged_gym convention: r = exp(-||err||² / σ).
+    # Divisor is σ (NOT σ²); v26.0 had this wrong as σ² which made the
+    # gaussian ~30× too tight at typical BC-bootstrap error magnitudes
+    # (0.2-0.4 m/s) and starved the policy of learning signal.
+    # Paper uses σ = 0.15 (tighter than legged_gym's default 0.25).
+    #
     # Two independent per-axis exp() terms (linear vel + yaw rate), not
     # one joint gaussian. Posture cmd components (pitch/roll/dh/dw) are
     # not tracked here — they're enforced via the AMP partition disc's
     # cmd-bin routing instead.
     _SIGMA = 0.15
-    _SIGMA_SQ = _SIGMA * _SIGMA
     v_err_sq = (state.cmd[0] - f_vx) ** 2 + (state.cmd[1] - f_vy) ** 2
     w_err_sq = (state.cmd[2] - f_wz) ** 2
-    r_lin_track = 1.0 * jnp.exp(-v_err_sq / _SIGMA_SQ)
-    r_ang_track = 0.5 * jnp.exp(-w_err_sq / _SIGMA_SQ)
+    r_lin_track = 1.0 * jnp.exp(-v_err_sq / _SIGMA)
+    r_ang_track = 0.5 * jnp.exp(-w_err_sq / _SIGMA)
     tracking = r_lin_track + r_ang_track
 
     # 2. Action smoothness — penalize per-step change in action.

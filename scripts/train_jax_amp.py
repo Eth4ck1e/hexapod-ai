@@ -137,9 +137,12 @@ DISC_HIDDEN    = (1024, 512)
 POLICY_ROLLOUT_ENVS  = 512    # was 1024
 POLICY_ROLLOUT_STEPS = 100    # was 200
 
-# v19: dropped from 5 to 2. Eval is the slowest non-training op per segment
-# (~15s × 5 = 75s). With short 5M segments we don't need fine eval granularity.
-NUM_EVALS      = 2            # was 5
+# v19: 5 -> 2. v26+ (2026-05-15): 2 -> 1. Eval inside a segment costs
+# ~15 s. At our 50M-step segments the within-segment learning curve is
+# mostly noise — we only care about end-of-segment quality, which the
+# orchestrator's separate EVAL_AFTER_SEGMENT pass captures with full
+# per-iter granularity for the watcher's BEST-iter detection.
+NUM_EVALS      = 1            # was 2 (was 5)
 
 SEED = 0
 
@@ -443,6 +446,14 @@ def main():
                         "6 motion x 5 height x 5 width). Requires priors npz "
                         "with bin_idx_t column. Replaces K-NN matching with "
                         "strict within-bin prior sampling.")
+    p.add_argument("--profile", action="store_true",
+                   help="wrap the training segment loop with jax.profiler. "
+                        "Writes a TensorBoard trace to logs/profile/<run>/. "
+                        "Adds ~10%% overhead, so run a short profile (1-2 "
+                        "segments) and don't compare throughput numbers to "
+                        "non-profiled runs. View via "
+                        "`tensorboard --logdir logs/profile/<run>` and open "
+                        "the Profile tab.")
     args = p.parse_args()
 
     print("=" * 70)
@@ -545,6 +556,19 @@ def main():
     print(f"  tensorboard: {log_dir}")
 
     t0 = time.perf_counter()
+
+    # Optional profiler — wraps the segment loop. View via TensorBoard
+    # Profile tab. Adds ~10% overhead so don't compare throughput numbers
+    # to non-profiled runs. (Don't re-import jax inside main() — Python
+    # would treat it as a local variable and shadow the module-level
+    # import for the entire function scope, causing UnboundLocalError
+    # at earlier `jax.*` calls.)
+    profile_dir = None
+    if args.profile:
+        profile_dir = Path("logs/profile") / args.run
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  profiling -> {profile_dir}")
+        jax.profiler.start_trace(str(profile_dir))
 
     for seg in range(args.segments):
         print(f"\n{'='*70}")
@@ -674,6 +698,12 @@ def main():
     print(f"\n{'='*70}")
     print(f"AMP TRAINING DONE in {elapsed:.1f} min ({args.segments} segments)")
     print(f"{'='*70}")
+
+    if args.profile and profile_dir is not None:
+        jax.profiler.stop_trace()
+        print(f"\nprofile saved to {profile_dir}")
+        print(f"view: .venv\\Scripts\\python.exe -m tensorboard.main --logdir {profile_dir} --port 6007")
+        print("then open the Profile tab in TensorBoard.")
 
 
 if __name__ == "__main__":

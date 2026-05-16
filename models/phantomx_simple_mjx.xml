@@ -36,7 +36,14 @@
        Newton solver typically converges in 3-15 iterations for hexapod
        contact configs; capping pathological cases at 20 saves throughput
        without losing accuracy. Revert to 100/50 if you observe contact
-       penetration or jitter. -->
+       penetration or jitter.
+
+       Benchmark 2026-05-15: tried lowering to 15. No measurable steady-
+       state throughput gain (~0%, both ran 230-240k it/s mid-segment),
+       confirming the solver was already converging well below the 20 cap.
+       Eval reward delta within noise. Reverted. -->
+
+
 
   <default>
     <joint damping="0.3" armature="0.01" frictionloss="0.01"/>

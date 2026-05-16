@@ -26,33 +26,33 @@ paths now:
 
 WSL venv at `~/.venv-mjx/` lives in WSL home — unaffected by the move.
 
-## Current state (2026-05-13)
+## Current state (2026-05-15)
+
+**v27 walks cleanly** — paper-pure reward + smaller priors + fixed σ convention. Best + final iters both visually walk; eval reward ~+1979/2000 max.
 
 **MJX pipeline mature and battle-tested.** PPO training runs at
-~200k it/s on the RTX 5060 Ti via WSL2. A 1B-step run (20 × 50M
-segments) finishes in ~2.5-3 hr. Optimal config (for current 114-dim
-obs + 150-bin partition disc): `num_envs=2048`, `batch=256`,
-`minibatches=8`, `unroll_length=20`. Note: `num_envs` dropped from
-4096 → 2048 in v24 to fit larger obs + multi-head disc in 16 GB
-VRAM. Same for `DISC_BATCH` 1024 → 512 and `N_ENVS_DEMO` 4096 → 2048.
+**~220-240k it/s** on the RTX 5060 Ti via WSL2 (back to pre-v24 levels
+after v26+ reverted obs to 78-dim). A 1B-step run (20 × 50M segments)
+finishes in ~2-2.5 hr. Optimal config: `num_envs=4096`, `batch=512`,
+`minibatches=8`, `unroll_length=20`. VRAM-budget knobs (`NUM_ENVS`,
+`DISC_BATCH`) are SoT in `chain_train.py` — change one place to scale.
 
-**AMP pipeline went through ~20 design iterations** v3 through v25.
-Major architecture shifts in chronological order:
+**AMP pipeline went through ~27 design iterations** v3 → v27. Major shifts:
 - v8: hardware-realistic max speed (0.356 m/s, MAX_SPEED 5× faster)
 - v10: initial-pose domain randomization
 - v11: paper-matching network (256, 128, 64) actor
 - v15: cmd-conditional discriminator (CMD_DIM_FOR_DISC=3 initially)
 - v17: full 9-D cmd in discriminator
 - v18: K-NN cmd-matched prior sampling (K=10), normalized distance
-- v21: uniform-z foot rest (fixed 3mm middle-leg asymmetry — `gait/controller.py` normalizes)
+- v21: uniform-z foot rest (fixed 3mm middle-leg asymmetry)
 - v22: recovery curriculum (push impulses) — **SHELVED**, hexapod stability profile makes pushes the wrong test
-- v23: **partition discriminator** (150 bins = 6 motion × 5 height × 5 width). Strict within-bin prior sampling. Fixed the cmd-blur failure mode where disc rewarded turning under straight cmd.
-- v24: **motor feedback obs** (joint_torque + joint_pos_error). Obs 78 → 114 dims. Simulates AX-12A "present load" + "present position" feedback. Critical prerequisite for terrain training.
-- v25 (in flight): **EMA-filtered velocity tracking** (alpha=0.05, ~100ms window) + **gait-phase contact penalty** — designed to defeat the v24 metric-gaming failure mode where the policy hit +458 tracking but visually didn't walk because instantaneous velocity tracking is jitter-gameable.
+- v23: **partition discriminator** (150 bins). Strict within-bin prior sampling. Fixed cmd-blur failure mode.
+- v24: motor feedback obs (joint_torque + joint_pos_error, 78 → 114 dims) — REVERTED in v26.
+- v25: EMA-filtered velocity tracking + contact penalty + drift pens — REVERTED in v26.
+- v26: **paper-pure realignment**. Stripped all hand-added penalties (drift, contact_mismatch, EMA filter); restored z_vel_w/body_angvel_xy_w to paper Table I values; added missing joint_accel_w; switched to per-axis exp tracking; obs back to 78-dim. Initial bug: `exp(-||err||²/σ²)` instead of `exp(-||err||²/σ)` made tracking 30× too tight at typical errors — bot didn't walk.
+- v27: **σ fix** (`/σ` not `/σ²`, matching legged_gym convention) + **smaller priors** (`amp_priors_v26_small.npz`, ~1M transitions vs 6.1M, saves ~2.2 GB GPU). NOW WALKING — best + final iters both clean.
 
-**Current best walking policy**: `checkpoints/amp_to_v23/iter12/final/params.pkl` (peak +602 eval, +267 tracking, clean visual walking on all 9 motion tests). Trained on 78-dim obs; watcher auto-detects and slices accordingly.
-
-**v24 is metric-better but visually broken**: eval +740, tracking +458 (~+75% over v23) — but the bot doesn't actually walk well. Same metric-vs-visual decoupling pattern we hit in v14/v15. Diagnosis: instantaneous velocity tracking is gameable via wobble/jitter; the new 36 obs dims gave the policy more capacity to game. v25 fixes the gameable signal.
+**Current best walking policy**: latest `amp_to_v27*/iter*/final/params.pkl` (use `python scripts\launch.py watcher` to auto-detect best iter). v23 iter12 still works for the legacy 78-dim obs (which v27 is back to).
 
 **Hardware reality check.** Bot is a Trossen PhantomX MK-III using **Dynamixel AX-12A** servos (TTL half-duplex multidrop UART, daisychained). Motor specs: 6.18 rad/s no-load, **1.5 N·m stall**, 9-12 V. Computed practical max walking speed: ~0.40 m/s. MJCF `forcerange` ±1.5 N·m matches real motor envelope. Full analysis in `docs/MAX_SPEED_ANALYSIS.md`.
 
@@ -64,9 +64,10 @@ change anything in one of these areas, edit ONLY the owning module.**
 
 | Module | Owns | Consumers |
 |---|---|---|
-| `envs/obs_layout.py` | Policy observation schema (114 dims, ordered slots) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
+| `envs/obs_layout.py` | Policy observation schema (78 dims as of v26+, was 114 in v24-v25) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
 | `envs/stance_envelope.py` | Stance height + dh-conditional width envelope | JAX env cmd sampler, watch_scaffold interactive presets, demo_phases watch tests |
 | `envs/cmd_bins.py` | 150-bin partition (motion × height × width) | JAX env disc routing, prior_data binning, multi-head disc, train_jax_amp |
+| `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `NUM_ENVS`, `DISC_BATCH` | train_jax_amp, pretrain_bc_jax, watch_demo_jax, watch_controller |
 
 If you find yourself manually syncing the same constant or formula
 between two files, **that's a signal to extract it to a SoT module**.
@@ -82,7 +83,7 @@ This pattern saved us from at least three drift bugs in v23→v25.
 | training | `scripts/train_jax_amp.py` (Brax PPO + AMP on GPU) | `legacy/sb3/train.py` (SB3 PPO on CPU) |
 | watch | `scripts/watch_demo_jax.py` (uses gym env for inference) | `legacy/sb3/watch_demo.py` |
 | MJCF | `models/phantomx_simple_mjx.xml` | `models/phantomx.xml` |
-| effective throughput | ~200k it/s end-to-end (was 240k pre-v24 with smaller obs) | ~5,400 SPS |
+| effective throughput | ~220-240k it/s end-to-end (v26+ restored after obs revert) | ~5,400 SPS |
 
 **Important**: the gym env is now used ONLY for watch / eval / record.
 Both envs construct obs via the shared `envs/obs_layout.py` module so
@@ -94,29 +95,35 @@ gyro, zero accel) matching what the policy saw during training.
 - **Discriminator**: `amp.discriminator.MultiHeadDiscriminator` — 2-layer shared backbone (1024, 512) + 150 output heads (one per cmd bin). Inference selects the active bin's head; training routes per-bin gradient. Total ~1.55M params, ~6 MB on GPU.
 - **Loss**: `multihead_discriminator_loss` — LSGAN + gradient penalty on prior batch, weight 10.0. Each bin's head gets gradient only from its-bin samples; shared backbone gets gradient from all.
 - **Style reward**: `multihead_style_reward` — `max(0, 1 - 0.25 * (D(transition, bin) - 1)²)`. Bounded in [0, 1]. Added to env reward via `λ_style * style_r` where `λ_style = 0.5` default.
-- **Prior format**: npz with `states_t` (N, 49) + `states_t1` (N, 49) + `cmds_t` (N, 9) + `bin_idx_t` (N,) — `bin_idx_t` is precomputed by `amp/prior_data.py` via `cmd_bins.cmd_to_bin()`. Current production prior: `checkpoints/amp_priors_v23.npz` (6.1M transitions, 150 bins, all populated, min 15k / median 42k samples per bin).
+- **Prior format**: npz with `states_t` (N, 49) + `states_t1` (N, 49) + `cmds_t` (N, 9) + `bin_idx_t` (N,) — `bin_idx_t` is precomputed by `amp/prior_data.py` via `cmd_bins.cmd_to_bin()`. **Current production prior: `checkpoints/amp_priors_v26_small.npz`** (1.0M transitions, ~7k median per bin, ~430 MB GPU). v23 priors (6.1M, 2.6 GB GPU) still on disk for fallback. Smaller priors saves ~2.2 GB VRAM with no observed quality loss — disc only consumes ~13k touches per bin per full training run.
 - **AMP state dim**: 49 (joint_pos 18 + joint_vel 18 + body_linvel_body 3 + body_angvel 3 + body_height 1 + foot_heights 6). Unchanged since v3. NOT affected by obs schema changes — obs is what the policy sees, AMP state is what the disc sees.
 
-## Reward function (current, v25)
+## Reward function (current, v26+ paper-pure)
 
-In `envs/hexapod_env_jax.py:_compute_reward`. Active terms:
+In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.03167) form.** Active terms:
 
-- **Positive**:
-  - `tracking_reward` — gaussian on cmd-vs-actual error. Motion components (vx, vy, wz) are **EMA-filtered** since v25 to defeat jitter-gaming. Posture components (pitch, roll, dh, dw) are instantaneous.
-- **Penalties** (all subtracted):
+- **Positive — task tracking** (two per-axis exp() terms, paper convention `exp(-||err||²/σ)` NOT `/σ²`):
+  - `r_lin_track = 1.0 * exp(-||v_xy_cmd - v_xy||² / 0.15)` — linear velocity tracking, max +1.0
+  - `r_ang_track = 0.5 * exp(-(ω_z_cmd - ω_z)² / 0.15)` — yaw rate tracking, max +0.5
+  - **Posture cmd components (pitch, roll, dh, dw) NOT tracked here** — AMP partition disc enforces them via cmd-bin routing. Was tracked in v25-/joint-gaussian, removed in v26.
+- **Penalties** (all subtracted, all paper Table I weights):
   - `action_rate_pen` (w=0.01) — smoothness
-  - `z_vel_pen` (w=1.0) — discourages body bounce
-  - `body_angvel_xy_pen` (w=0.08) — discourages body twist
-  - `joint_torque_pen` (w=2e-6) — paper value
-  - `joint_vel_limit_pen` (w=0.5) — deadband+quadratic over 90% of motor max
-  - `joint_torque_limit_pen` (w=0.05) — deadband+quadratic over 90% of stall
-  - `foot_force_limit_pen` (w=0.1) — penalize foot contact forces > 30 N
-  - `contact_mismatch_pen` (w=0.02) — v25 NEW. Penalizes feet whose actual contact state doesn't match expected tripod phase (groups A={0,2,4} vs B={1,3,5} alternate stance/swing per gait cycle).
-- **Zeroed** (deprecated but kept in metrics for log-parser compat):
-  - `yaw_drift_pen`, `vy_drift_pen` (w=0; were overcompensating)
-  - `sliding_pen`, `excess_contact_pen`, `airborne_pen`, `short_contact_pen`, `foot_dev_pen` (legacy contact penalties from pre-AMP era)
+  - `z_vel_pen` (w=1.0) — body bounce
+  - `body_angvel_xy_pen` (w=0.08) — body twist
+  - `joint_torque_pen` (w=2e-6) — torque magnitude
+  - `joint_accel_pen` (w=1.5e-7) — **NEW v26**, was missing
+  - `joint_vel_limit_pen` (w=0.5) — deadband+quadratic over motor max
+  - `joint_torque_limit_pen` (w=0.05) — deadband+quadratic over stall
+  - `foot_force_limit_pen` (w=0.1) — foot contact forces > 30 N
+- **Zeroed in v26 (kept in metrics for log-parser compat)**:
+  - `yaw_drift_pen`, `vy_drift_pen`, `vx_drift_pen` (w=0; not in paper, were fighting exploits AMP should solve)
+  - `contact_mismatch_pen` (w=0; partition disc handles tripod gait via bin routing)
+  - EMA filter on velocity tracking (`linvel_ema_alpha = 1.0` passes through instantaneous; was 0.05 in v25)
+  - Legacy contact penalties from pre-AMP era
 
-**Style reward** is added by `HexapodAMPEnv.step` separately. NOT in `_compute_reward`.
+**Style reward** is added by `HexapodAMPEnv.step` separately, NOT in `_compute_reward`. `λ_style = 1.0` (was 0.5 in v25). Style component is also bounded ~+0.5/step → max total reward per step ≈ 2.0, max per 1000-step episode ≈ +2000.
+
+**Critical convention**: legged-RL tracking reward divides squared error by `σ`, not `σ²`. Paper Table I notation `exp(||err||₂/0.15)` looks ambiguous but the legged_gym source confirms the convention. v26.0 had this wrong (`/σ²`); v27 fixes to `/σ`.
 
 ## Cmd vector (9 floats, physical units)
 
@@ -138,37 +145,38 @@ In `envs/hexapod_env_jax.py:_compute_reward`. Active terms:
 
 ## Multi-stage training pipeline (current view)
 
-- ✅ **Stage 0** — BC pretrain (mimics scaffold; zero foot residual = scaffold motion). Current best: `bc_pretrained_jax_v24`.
-- ✅ **Stage 1** — AMP-guided PPO with partition disc. Current best: `amp_to_v23/iter12` (clean walker).
-- ⏳ **Stage 1b** (current) — refine reward to be ungameable (v25 EMA tracking + contact penalty).
+- ✅ **Stage 0** — BC pretrain (mimics scaffold; zero foot residual = scaffold motion). Current best: `bc_pretrained_jax_v26b` (78-dim obs).
+- ✅ **Stage 1** — AMP-guided PPO with partition disc + paper-pure reward. Current best: latest `amp_to_v27*` (clean walker on best + final).
 - ⏳ **Stage 2** — Heavy domain randomization (#82). Motor strength, friction, payload, joint stiffness, IMU noise. Sim-to-real critical.
-- ⏳ **Stage 3** — Terrain randomization (#72). Perlin heightfield + obstacles. AMP's actual value-add over scaffold becomes visible here.
+- ⏳ **Stage 3** — Terrain randomization (#72). Perlin heightfield + obstacles. AMP's actual value-add over scaffold becomes visible here. Will likely need asymmetric A-C (#85) + memory encoder (#86) per paper.
 - ⏳ **Stage 4** — PTQ int8 quantization (#101). ~50 KB deployable model.
 - ⏳ **Stage 5** — ESP32-S3 firmware (#77). Policy inference + scaffold + servo bus + BT controller.
 
-## Active task plan (post-2026-05-13)
+## Active task plan (post-2026-05-15)
 
 **In execution order. See task list (#100+) for current.**
 
 **Now / immediate:**
-1. ⏳ v25 (#106) — fresh chain with EMA tracking + contact penalty (just kicked off)
-2. ⏳ v25 watch test — verify gameable tracking is defeated
+1. ✅ v27 walking — paper-pure + σ fix + smaller priors (DONE)
+2. ⏳ Heavy DR (#82) — motor strength, friction, payload, sensor noise
 
-**Phase 2 (after v25 settles):**
-3. ⏳ Heavy DR (#82) — motor strength, friction, payload, sensor noise
-4. ⏳ Terrain (#72) — perlin heightfield + obstacles, regen priors on terrain
+**Phase 2 (after DR settles):**
+3. ⏳ Asymmetric A-C with privileged critic (#85) — paper's terrain solution
+4. ⏳ Memory/temporal encoder (#86) — 5-step proprio history latent, paper's terrain solution
+5. ⏳ Terrain randomization (#72) — perlin heightfield + obstacles, regen priors on terrain
 
 **Phase 3 (deployment prep):**
-5. ⏳ PTQ int8 (#101) — int8 quantize the final policy
-6. ⏳ QAT fallback (#102) — only if PTQ degrades quality
+6. ⏳ PTQ int8 (#101) — int8 quantize the final policy
+7. ⏳ QAT fallback (#102) — only if PTQ degrades quality
 
 **Phase 4 (hardware, when bot arrives):**
-7. ⏳ AX-12A endpoint calibration (#74)
-8. ⏳ ESP32 firmware (#77)
+8. ⏳ AX-12A endpoint calibration (#74)
+9. ⏳ ESP32 firmware (#77)
+
+**Side projects:**
+- Mini hexapod chassis (separate subdir, when measurements available)
 
 **Backlog / nice-to-have:**
-- Asymmetric A-C with privileged critic (#85)
-- Memory/temporal encoder (#86)
 - Distillation only if PTQ insufficient (#87)
 - Pedagogical 3D gait visualizer (#64)
 - Learning topic: num_envs vs PPO quality (#25)
@@ -182,7 +190,9 @@ In `envs/hexapod_env_jax.py:_compute_reward`. Active terms:
 - **Foot sphere has ~7 mm radius**: stance detection from `geom_xpos` uses threshold `z < 12 mm`.
 - **Pitch sign convention**: env's `_body_pitch_roll` extracts via standard math (positive = nose DOWN), then negates to match aerospace convention.
 - **Body-side coxa convention**: same MJCF axis on R and L coxas, but legs mount on opposite body sides → +rotation swings the leg in OPPOSITE physical directions.
-- **MJX requires Euler integrator + trimmed contact pairs**. `phantomx_simple_mjx.xml` uses `integrator="Euler"`, `iterations="20"`, contact bitmasks restricting to feet↔floor. Gives 200k+ it/s vs ~6k with defaults.
+- **MJX requires Euler integrator + trimmed contact pairs**. `phantomx_simple_mjx.xml` uses `integrator="Euler"`, `iterations="20"`, contact bitmasks restricting to feet↔floor. Gives 200k+ it/s vs ~6k with defaults. Tried lowering iterations to 15 (2026-05-15) for more throughput — solver was already converging well below the cap, no measurable gain. 20 stays.
+- **Tracking reward σ convention**: `exp(-||err||²/σ)`, NOT `exp(-||err||²/σ²)`. Squared error in numerator divides by σ (not σ²). Confirmed against `legged_gym/legged_robot.py` source. v26.0 had this wrong as `/σ²`, made tracking ~30× too tight at typical errors → bot got near-zero reward → couldn't learn. v27 fixes to `/σ`. When porting any tracking-reward formula from a paper, cross-check against legged_gym source — paper notation often elides the convention.
+- **XLA flag verification gotcha**: Windows JAX is CPU-only and silently accepts GPU flag names with invalid enum values. Always test new XLA flags via `wsl bash -lc "XLA_FLAGS='...' ~/.venv-mjx/bin/python -c 'import jax; print(jax.devices())'"`. Burned by `--xla_gpu_enable_command_buffer=COMMAND_BUFFER` (passed Windows test, failed on WSL). Verified working on jaxlib 0.10: `--xla_gpu_enable_latency_hiding_scheduler=true`. Verified zero gain on our workload (tested + reverted): `--xla_gpu_enable_command_buffer=...`.
 - **Brax 0.14.2 + JAX 0.10 incompat**: Brax uses `jax.device_put_replicated` which JAX 0.10 removed. `scripts/train_jax_amp.py` shims it before importing brax.
 - **PowerShell `>>` continuation breaks `wsl bash -lc "..."`**: paste the whole invocation as ONE physical line.
 - **Always use `python -u` when piping training stdout through `tee`**: block-buffered pipes can swallow hours of training output before flushing.

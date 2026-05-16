@@ -81,14 +81,53 @@ JAX_CACHE_DIR = str(PROJECT_ROOT / ".cache" / "jax_hexapod")
 
 
 def enable_jax_cache(cache_dir: str = JAX_CACHE_DIR) -> None:
-    """Turn on JAX's persistent compilation cache. Idempotent — safe to
-    call multiple times. Must be called BEFORE any JAX op runs (else
-    the early ops will compile uncached)."""
+    """Turn on JAX's persistent compilation cache + XLA performance flags.
+    Idempotent — safe to call multiple times. Must be called BEFORE any
+    JAX op runs (else the early ops will compile uncached and the env
+    flags won't take effect)."""
+    import os
     import jax
+
+    # Persistent compilation cache — JIT'd functions persist across runs.
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
     jax.config.update("jax_compilation_cache_dir", cache_dir)
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.5)
+
+    # XLA performance flags. MUST be set in os.environ BEFORE JAX
+    # initializes the runtime — jax.config.update() won't propagate
+    # these to XLA at runtime. enable_jax_cache() is called first thing
+    # at module import so this is the right place for them.
+    #
+    # Existing values are preserved if already set (env vars win), so
+    # users can override on the command line.
+    existing_xla = os.environ.get("XLA_FLAGS", "")
+    # Escape hatch for profiling: the latency hiding scheduler reorders
+    # kernel launches asynchronously which conflicts with the JAX profiler's
+    # stream-capture mechanism (CUDA_ERROR_LAUNCH_FAILED). Set
+    # HEXAPOD_DISABLE_XLA_PERF_FLAGS=1 to skip adding the perf flags for a
+    # profile run, leaving only whatever was already in XLA_FLAGS.
+    if os.environ.get("HEXAPOD_DISABLE_XLA_PERF_FLAGS"):
+        new_xla_flags = []
+    else:
+        new_xla_flags = [
+            # Overlap kernel launches with memory transfers / compute.
+            "--xla_gpu_enable_latency_hiding_scheduler=true",
+            # NOTE: --xla_gpu_enable_command_buffer was benchmarked
+            # 2026-05-15 (item #1 of optimization pass) with valid values
+            # FUSION,CUSTOM_CALL,WHILE,CUDNN,CUBLAS,CUBLASLT — no
+            # measurable steady-state gain (~0%) and a 30% one-time JIT
+            # recompile penalty. XLA's default fusion already captures the
+            # wins for our MJX workload. Skip.
+        ]
+    flags = " ".join(new_xla_flags) + (f" {existing_xla}" if existing_xla else "")
+    os.environ["XLA_FLAGS"] = flags.strip()
+
+    # XLA_PYTHON_CLIENT_MEM_FRACTION intentionally not set here. Default
+    # is 0.75 which leaves headroom for the Windows desktop compositor +
+    # browser / IDE during foreground training. Set explicitly via env
+    # var (e.g. =0.92) for overnight / dedicated runs that don't share
+    # the GPU with the desktop.
 
 
 def find_latest_checkpoint(prefix: str) -> Path | None:
