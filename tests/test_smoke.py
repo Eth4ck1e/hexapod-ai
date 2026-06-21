@@ -30,7 +30,7 @@ def test_import_gait():
 
 def test_import_envs_obs_layout():
     """envs.obs_layout — single source of truth for obs schema."""
-    from envs.obs_layout import compose_obs, OBS_DIM  # noqa: F811
+    from envs.obs_layout import OBS_DIM  # noqa: F811
     assert OBS_DIM > 10
 
 
@@ -43,8 +43,9 @@ def test_import_envs_stance_envelope():
 
 def test_import_envs_cmd_bins():
     """envs.cmd_bins — 150-bin partition for multi-head disc."""
-    from envs.cmd_bins import cmd_to_bin  # noqa: F811
     import numpy as np
+
+    from envs.cmd_bins import cmd_to_bin  # noqa: F811
     idx = cmd_to_bin(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     assert 0 <= idx < 150
 
@@ -119,6 +120,7 @@ def test_controller_init():
 def test_controller_predict():
     """Controller.predict produces correct joint shape."""
     import numpy as np
+
     from gait import Controller
     model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
     ctrl = Controller(model_path)

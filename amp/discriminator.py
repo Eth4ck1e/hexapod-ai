@@ -25,13 +25,12 @@ with PPO.
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
 import optax
 from flax import linen as nn
-
 
 STATE_DIM       = 49     # must match amp/prior_data.py per-step state vector
 # Cmd-conditional discriminator (v15+): the discriminator additionally
@@ -230,8 +229,9 @@ def style_reward(params,
 # ============================================================================
 def _self_test():
     import time
-    import numpy as np
     from pathlib import Path
+
+    import numpy as np
 
     PRIOR_PATH = Path("checkpoints/amp_priors_smoke.npz")
     if not PRIOR_PATH.exists():
@@ -297,13 +297,13 @@ def _self_test():
     # Sanity check: discriminator should now confidently classify the two.
     final_prior  = float(jnp.mean(disc.apply(params, prior[:1024])))
     final_noise  = float(jnp.mean(disc.apply(params, noise[:1024])))
-    print(f"\n  final discriminator scores:")
+    print("\n  final discriminator scores:")
     print(f"    prior:  mean={final_prior:+.3f}  (target +1)")
     print(f"    noise:  mean={final_noise:+.3f}  (target -1)")
     if final_prior > 0.5 and final_noise < -0.5:
-        print(f"  PASS — discriminator learned to distinguish prior from noise")
+        print("  PASS — discriminator learned to distinguish prior from noise")
     else:
-        print(f"  WARN — discrimination weak; investigate before integrating")
+        print("  WARN — discrimination weak; investigate before integrating")
 
 
 if __name__ == "__main__":

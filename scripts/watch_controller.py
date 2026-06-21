@@ -31,28 +31,33 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import jax
 import jax.numpy as jnp
-
+import numpy as np
 import pygame
 
 # Make sibling scripts importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from chain_train import enable_jax_cache, BASE_NAME as CHAIN_BASE_NAME, \
-    ACTION_SPACE as CHAIN_ACTION_SPACE, MODEL_PATH as CHAIN_MODEL_PATH, \
-    RENDER_MODEL_PATH as CHAIN_RENDER_MODEL_PATH
+from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
+from chain_train import MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import RENDER_MODEL_PATH as CHAIN_RENDER_MODEL_PATH
+from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
+from brax.training.agents.ppo.networks import make_ppo_networks
+from controller_mapping import (
+    DEFAULT_CALIBRATION,
+    HEIGHT_LEVELS_M,
+    WIDTH_LEVELS_M,
+    ControllerState,
+    build_cmd,
+    load_calibration,
+    read_joystick_via_calibration,
+)
 
 from envs.hexapod_env import HexapodEnv
-from controller_mapping import (
-    ControllerState, build_cmd,
-    DEFAULT_CALIBRATION, load_calibration, read_joystick_via_calibration,
-    HEIGHT_LEVELS_M, WIDTH_LEVELS_M,
-)
 
 DEFAULT_CALIBRATION_PATH = (Path(__file__).resolve().parent.parent
                             / "checkpoints" / "controller_calibration.json")
@@ -125,7 +130,7 @@ def _detect_joystick(prefer_substring: str | None,
                 print(f"  -> selected index {i} (XInput axis/button shape)")
             return j
 
-    print(f"\nNo XInput-shaped gamepad found.")
+    print("\nNo XInput-shaped gamepad found.")
     return None
 
 
@@ -226,7 +231,7 @@ def main():
     else:
         calibration = DEFAULT_CALIBRATION
         print(f"No calibration at {cal_path}; using DEFAULTS.")
-        print(f"  Run scripts/calibrate_controller.py to generate one.")
+        print("  Run scripts/calibrate_controller.py to generate one.")
 
     # --- Override speed/yaw scale if user passed flags ---
     import controller_mapping as _cm
@@ -265,8 +270,8 @@ def main():
     env.gait_scale = args.gait_scale
 
     # Patch obs to JAX-style (matches watch_demo_jax.py rationale).
-    import types
     import math
+    import types
     def _get_obs(self):
         qpos = self._data.qpos
         qvel = self._data.qvel
@@ -289,8 +294,8 @@ def main():
     if dual_render:
         render_mjmodel = mujoco.MjModel.from_xml_path(render_model_path)
         if render_mjmodel.nq != env._model.nq:
-            print(f"ERROR: joint count mismatch between inference model "
-                  f"and render model.")
+            print("ERROR: joint count mismatch between inference model "
+                  "and render model.")
             sys.exit(1)
         render_mjdata = mujoco.MjData(render_mjmodel)
         render_mjdata.qpos[:] = env._data.qpos
@@ -316,7 +321,7 @@ def main():
     print(f"MAX_YAW_RATE: {env._ctrl.MAX_YAW_RATE:.4f} rad/s")
     print(f"Height levels (mm): {[int(h*1000) for h in HEIGHT_LEVELS_M]}")
     print(f"Width  levels (mm): {[round(w*1000, 1) for w in WIDTH_LEVELS_M]}")
-    print(f"\n=== CONTROLLER BINDINGS ===")
+    print("\n=== CONTROLLER BINDINGS ===")
     print("  L stick X/Y    -> vx, vy (omnidirectional)")
     print("  L trigger      -> turn LEFT  (proportional)")
     print("  R trigger      -> turn RIGHT (proportional)")
@@ -366,7 +371,7 @@ def main():
     sm_lt = sm_rt = -1.0     # triggers rest at -1 on XInput
     smooth_initialized = False
 
-    print(f"Ready. Drive the bot with the controller. Ctrl+C to exit.")
+    print("Ready. Drive the bot with the controller. Ctrl+C to exit.")
     print(f"Joystick read rate: {args.rate} Hz   "
           f"Env physics rate: {1.0/env_dt:.0f} Hz   "
           f"Speed multiplier: {args.speed}")

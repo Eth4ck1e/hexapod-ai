@@ -34,24 +34,29 @@ import time
 import types
 from pathlib import Path
 
-import numpy as np
-import mujoco
 import imageio
 import jax
 import jax.numpy as jnp
+import mujoco
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from chain_train import enable_jax_cache, ACTION_SPACE as CHAIN_ACTION_SPACE, MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
+from chain_train import MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
-
-from envs.hexapod_env import HexapodEnv
+from brax.training.agents.ppo.networks import make_ppo_networks
 from demo_phases import (
-    DEMO_PHASES, DEMO_PHASES_PAPER, DEMO_PHASES_PAPER_STANCE,
+    DEMO_PHASES,
+    DEMO_PHASES_PAPER,
+    DEMO_PHASES_PAPER_STANCE,
     DEMO_PHASES_SHOWCASE,
 )
+
+from envs.hexapod_env import HexapodEnv
 
 
 def _patched_obs(env: HexapodEnv) -> None:

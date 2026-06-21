@@ -11,7 +11,6 @@ a curriculum that fades scaffold contribution, build a fresh env per
 stage and call ppo_train with `restore_params=...` chaining.
 """
 
-from typing import Any
 
 import jax
 import jax.numpy as jnp

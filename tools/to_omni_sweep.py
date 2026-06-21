@@ -36,8 +36,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.to_solver import solve_with_warmstart, compute_metrics
-
+from tools.to_solver import compute_metrics, solve_with_warmstart
 
 # Grid definition. Speeds confirmed practical by docs/MAX_SPEED_ANALYSIS.md:
 #   0.10 m/s — low gait,    0.17 m/s — mid (signed-off),  0.25 m/s — near max

@@ -52,14 +52,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from tensorboardX import SummaryWriter
 
 # Enable persistent JAX compile cache before any JAX op runs.
 from chain_train import (
+    ACTION_SPACE,
+    BASE_NAME,
+    CMD_MASK,
+    DISC_BATCH,
+    MODEL_PATH,
+    NUM_ENVS,
     enable_jax_cache,
-    MODEL_PATH, BASE_NAME, CMD_MASK, ACTION_SPACE,
-    NUM_ENVS, DISC_BATCH,
 )
+from tensorboardX import SummaryWriter
+
 enable_jax_cache()
 
 # JAX 0.10 / Brax 0.14.2 compat shim — same as train_jax.py.
@@ -75,14 +80,18 @@ if not hasattr(jax, "device_put_replicated"):
 from brax.training.agents.ppo import train as ppo_train
 from brax.training.agents.ppo.networks import make_ppo_networks
 
-from envs.hexapod_amp_env import HexapodAMPEnv, _extract_amp_state
-from envs import hexapod_env_jax as hex_jax
-from envs.cmd_bins import cmd_to_bin, N_BINS
 from amp.discriminator import (
-    Discriminator, discriminator_loss, STATE_DIM, TRANSITION_DIM,
-    CMD_DIM_FOR_DISC, cmd_for_disc,
-    MultiHeadDiscriminator, multihead_discriminator_loss,
+    CMD_DIM_FOR_DISC,
+    STATE_DIM,
+    TRANSITION_DIM,
+    Discriminator,
+    MultiHeadDiscriminator,
+    cmd_for_disc,
+    discriminator_loss,
+    multihead_discriminator_loss,
 )
+from envs.cmd_bins import N_BINS, cmd_to_bin
+from envs.hexapod_amp_env import HexapodAMPEnv
 
 # v11+: paper-matching Actor (Chen et al. uses 256, 128, 64 for the
 # low-level MLP). Must match pretrain_bc_jax.py's POLICY_HIDDEN_LAYERS

@@ -31,10 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import re
-import shlex
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -299,14 +296,14 @@ def main() -> None:
         if not result.get("ok"):
             print(f"\n!! config num_envs={ne} did NOT produce a clean result.")
             if args.stop_on_fail:
-                print(f"   --stop-on-fail set; aborting sweep here.")
+                print("   --stop-on-fail set; aborting sweep here.")
                 break
             # Heuristic: if a config OOMs/fails at a high num_envs, the
             # next-larger candidate will almost certainly OOM too. Skip
             # the rest of the sweep to protect the system.
             if ne >= 8192:
-                print(f"   num_envs >= 8192 failed; skipping larger "
-                      f"candidates as a safety measure.")
+                print("   num_envs >= 8192 failed; skipping larger "
+                      "candidates as a safety measure.")
                 break
 
     sweep_total = time.perf_counter() - sweep_t0

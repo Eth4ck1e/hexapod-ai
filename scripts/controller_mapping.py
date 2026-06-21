@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import numpy as np
 
-
 # --- Discrete level tables (match envs/hexapod_env_jax.py cmd_sample_ranges) ---
 # Negative cmd[5] = body raised; positive = lowered.
 # Negative cmd[6] = stance narrower; positive = wider.

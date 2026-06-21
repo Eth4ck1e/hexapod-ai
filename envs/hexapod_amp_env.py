@@ -22,17 +22,19 @@ import jax
 import jax.numpy as jnp
 from brax.envs.base import State
 
+from amp.discriminator import (
+    Discriminator,
+    MultiHeadDiscriminator,
+    cmd_for_disc,
+    multihead_style_reward,
+    style_reward,
+)
+from envs import hexapod_env_jax as hex_jax
+from envs.cmd_bins import N_BINS, cmd_to_bin
 from envs.hexapod_brax_env import (
     HexapodBraxEnv,
     _initial_brax_state,
     _scalar_metrics,
-)
-from envs import hexapod_env_jax as hex_jax
-from envs.cmd_bins import cmd_to_bin, N_BINS
-from amp.discriminator import (
-    Discriminator, MultiHeadDiscriminator,
-    style_reward, multihead_style_reward,
-    STATE_DIM, cmd_for_disc,
 )
 
 

@@ -16,11 +16,11 @@ import argparse
 import math
 import pickle
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-import jax, jax.numpy as jnp
-
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
+from brax.training.agents.ppo.networks import make_ppo_networks
 
 from envs.hexapod_env import HexapodEnv
 
@@ -87,7 +87,7 @@ def main() -> None:
     speed = (env.SPEED_MIN_FRAC + 0.40) * env._ctrl.MAX_SPEED   # mid-band walk
     base_cmd = np.array([speed, 0, 0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
     base_action = np.asarray(infer(jnp.asarray(build_obs(base_cmd))))
-    print(f"\nbase_cmd = walk forward only")
+    print("\nbase_cmd = walk forward only")
     print(f"base_action[0:6]: {base_action[:6].round(3)}")
 
     probes = [
@@ -98,7 +98,7 @@ def main() -> None:
         ("roll  +8°",   4, +DEG(8)),
         ("roll  -8°",   4, -DEG(8)),
     ]
-    print(f"\n  per-axis cmd response (action delta from base_cmd):")
+    print("\n  per-axis cmd response (action delta from base_cmd):")
     print(f"  {'axis':<14} {'|action - base|':<24} {'|scaffold_bc - base|':<26}")
     print(f"  {'-'*14} {'-'*24} {'-'*26}")
     for label, slot, val in probes:

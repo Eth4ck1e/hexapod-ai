@@ -20,15 +20,15 @@ See docs/kinematics.md for the IK derivation.
 """
 
 from .controller import (
-    Controller,
-    LEG_NAMES,
-    LEG_BODY_YAW,
+    COXA_LENGTH,
     COXA_POS_BODY,
+    FEMUR_LENGTH,
+    LEG_BODY_YAW,
+    LEG_NAMES,
     LEG_PHASE,
     NEUTRAL_POSE,
-    COXA_LENGTH,
-    FEMUR_LENGTH,
     TIBIA_LENGTH,
+    Controller,
 )
 
 __all__ = [

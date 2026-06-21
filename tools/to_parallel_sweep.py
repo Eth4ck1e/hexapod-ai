@@ -37,16 +37,13 @@ import multiprocessing as mp
 import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
 # HSL bootstrap (no-op on non-Windows; harmless if HSL absent).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hsl_bootstrap import HSL_AVAILABLE  # noqa: F401
-
 import numpy as np
-
+from _hsl_bootstrap import HSL_AVAILABLE  # noqa: F401
 
 # Default reference TO config (matches to_solver.build_and_solve_to defaults).
 DEFAULTS = dict(

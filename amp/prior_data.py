@@ -32,6 +32,9 @@ Run inside WSL2 (needs MJX/CUDA):
 from __future__ import annotations
 
 import argparse
+
+# Enable persistent JAX compilation cache before any JAX op runs.
+import sys
 import time
 from pathlib import Path
 
@@ -39,14 +42,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# Enable persistent JAX compilation cache before any JAX op runs.
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from chain_train import enable_jax_cache, MODEL_PATH
+from chain_train import MODEL_PATH, enable_jax_cache
+
 enable_jax_cache()
 
 from envs import hexapod_env_jax as hex_jax
-
 
 STATE_DIM = 49
 
@@ -207,13 +208,13 @@ def main():
     print(f"  saved ({sz_mb:.1f} MB)")
 
     # Sanity report
-    print(f"\n  state vector stats (mean, std across all transitions):")
+    print("\n  state vector stats (mean, std across all transitions):")
     print(f"    joint_pos[0]   (RR coxa):     mean={s_t[:,0].mean():+.3f}  std={s_t[:,0].std():.3f}")
     print(f"    body_linvel_x:                mean={s_t[:,36].mean():+.3f}  std={s_t[:,36].std():.3f}")
     print(f"    body_angvel_z:                mean={s_t[:,41].mean():+.3f}  std={s_t[:,41].std():.3f}")
     print(f"    body_height:                  mean={s_t[:,42].mean():+.3f}  std={s_t[:,42].std():.3f}")
     print(f"    foot_height min:              mean={s_t[:,43:].mean():+.3f}  std={s_t[:,43:].std():.3f}")
-    print(f"  cmd vector stats:")
+    print("  cmd vector stats:")
     print(f"    vx (cmd[0]):                  mean={cmd_t[:,0].mean():+.3f}  std={cmd_t[:,0].std():.3f}")
     print(f"    vy (cmd[1]):                  mean={cmd_t[:,1].mean():+.3f}  std={cmd_t[:,1].std():.3f}")
     print(f"    wz (cmd[2]):                  mean={cmd_t[:,2].mean():+.3f}  std={cmd_t[:,2].std():.3f}")

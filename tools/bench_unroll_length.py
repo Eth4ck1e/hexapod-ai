@@ -31,7 +31,6 @@ import argparse
 import json
 import platform
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -295,8 +294,8 @@ def main() -> None:
         _save(results, sweep_started, args)
         if not result.get("ok"):
             print(f"\n!! unroll_length={ul} did NOT produce a clean result.")
-            print(f"   unroll_length variation should never OOM at fixed "
-                  f"num_envs=8192; continuing sweep.")
+            print("   unroll_length variation should never OOM at fixed "
+                  "num_envs=8192; continuing sweep.")
 
     sweep_total = time.perf_counter() - sweep_t0
     print(f"\nsweep total wall time: {sweep_total:.1f}s "

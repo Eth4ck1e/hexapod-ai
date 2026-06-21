@@ -25,14 +25,14 @@ Run:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-import numpy as np
 import mujoco
+import numpy as np
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from gait.controller import Controller, LEG_NAMES
+from gait.controller import LEG_NAMES, Controller
 
 
 def _rotz(theta: float) -> np.ndarray:

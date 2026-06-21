@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pygame
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = PROJECT_ROOT / "checkpoints" / "controller_calibration.json"
 
@@ -129,7 +128,7 @@ def _detect_axis_pushed_to(joystick: pygame.joystick.Joystick,
     deltas.sort(reverse=True)
 
     # Print the top 3 axes for visibility.
-    print(f"  Top 3 axis deltas (in requested direction):")
+    print("  Top 3 axis deltas (in requested direction):")
     for d, i in deltas[:3]:
         print(f"    axis {i:>2}  delta {d:+.3f}  rest={rest[i]:+.3f}  "
               f"min={mins[i]:+.3f}  max={maxs[i]:+.3f}")
@@ -151,13 +150,13 @@ def _detect_axis_pushed_to(joystick: pygame.joystick.Joystick,
 
     if best_d < min_delta:
         print(f"  WARNING: largest swing {best_d:.2f} below threshold {min_delta}.")
-        print(f"  Try pushing harder. Or check the controller is in the right mode.")
+        print("  Try pushing harder. Or check the controller is in the right mode.")
         choice = input(f"  [r]etry, [a]ccept axis {best_i} anyway, or [s]kip: ").strip().lower()
         if choice == "a":
             print(f"  -> axis {best_i} (forced)")
             return best_i, float(sign)
         if choice == "s":
-            print(f"  -> SKIPPED")
+            print("  -> SKIPPED")
             return -1, 0.0
         return _detect_axis_pushed_to(joystick, sign, prompt, min_delta,
                                        allow_button_fallback)
@@ -184,7 +183,7 @@ def _detect_button_press(joystick: pygame.joystick.Joystick,
                 print(f"  -> button {i}")
                 return i
         time.sleep(0.02)
-    print(f"  TIMEOUT: no button press detected. Skipping.")
+    print("  TIMEOUT: no button press detected. Skipping.")
     return -1
 
 
@@ -212,7 +211,7 @@ def _detect_hat_direction(joystick: pygame.joystick.Joystick,
                 print(f"  -> hat {i}")
                 return i
         time.sleep(0.02)
-    print(f"  TIMEOUT: no D-pad input detected. (Maybe it's button-mapped?)")
+    print("  TIMEOUT: no D-pad input detected. (Maybe it's button-mapped?)")
     return -1
 
 
@@ -223,9 +222,9 @@ def _live_monitor(joystick: pygame.joystick.Joystick) -> None:
     n_buttons = joystick.get_numbuttons()
     n_hats    = joystick.get_numhats()
 
-    print(f"\n=== LIVE MONITOR — move every control on your gamepad ===")
+    print("\n=== LIVE MONITOR — move every control on your gamepad ===")
     print(f"  axes={n_axes}  buttons={n_buttons}  hats={n_hats}")
-    print(f"  Press Ctrl+C when done watching.\n")
+    print("  Press Ctrl+C when done watching.\n")
 
     try:
         while True:
@@ -260,10 +259,10 @@ def _manual_calibration(joystick: pygame.joystick.Joystick) -> dict:
         try:
             idx = int(s)
         except ValueError:
-            print(f"    invalid, skipping")
+            print("    invalid, skipping")
             return
         # Determine sign by asking which direction is "positive."
-        sign_str = input(f"    sign? [+1 or -1, default +1]: ").strip()
+        sign_str = input("    sign? [+1 or -1, default +1]: ").strip()
         sign = -1.0 if sign_str.startswith("-") else 1.0
         cal["axes"][slot] = {"index": idx, "sign": sign}
 

@@ -45,7 +45,7 @@ import mujoco
 import numpy as np
 import scipy.spatial.transform as transform
 
-from gait.controller import Controller, LEG_NAMES
+from gait.controller import LEG_NAMES, Controller
 
 MODEL_PATH    = "models/phantomx_simple_mjx.xml"
 FOOT_LOCAL    = np.array([0.134, 0.031, 0.0])   # tibia-local foot-tip (sphere center)
@@ -177,7 +177,7 @@ def mirror_trajectory(source_path: str, mirror_op: str, out_path: str) -> None:
     if total_violations:
         print(f"  total RoM violations: {total_violations} (saved anyway)")
     else:
-        print(f"  all joints within RoM")
+        print("  all joints within RoM")
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_path,

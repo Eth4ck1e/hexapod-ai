@@ -21,14 +21,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
-import numpy as np
 import mujoco
+import numpy as np
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from gait.controller import Controller, LEG_NAMES
+from gait.controller import LEG_NAMES, Controller
 
 
 def run_one(period: float, path_radius: float,
@@ -152,7 +152,7 @@ def main():
     results = []
     print(f"Sweeping {len(args.periods)} × {len(args.path_radii)} = "
           f"{len(args.periods) * len(args.path_radii)} combos")
-    print(f"  cmd: max_speed for each combo (= 4 × path_radius / period)")
+    print("  cmd: max_speed for each combo (= 4 × path_radius / period)")
     print(f"  measurement: {args.cycles} cycles after {args.settle}-cycle settle")
     print()
     print(f"{'period':>7} {'path_R':>7} {'max_cmd':>9} {'actual':>9} {'eff':>5}"

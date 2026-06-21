@@ -48,9 +48,9 @@ swing, no lift) and feet rest at their stance-modulated, tilted positions.
 """
 
 import math
-import numpy as np
-import mujoco
 
+import mujoco
+import numpy as np
 
 # ============================================================================
 # Constants used by both Controller and external callers
