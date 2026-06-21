@@ -53,6 +53,8 @@ jobs:
           python -m pip install --upgrade pip wheel
           # CPU-only PyTorch — no CUDA libs needed on CI runners.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # CPU-only JAX — needed by amp/ and envs/ modules
+          pip install jax[cpu] jaxlib
           pip install -r requirements.txt
           pip install pytest
 
