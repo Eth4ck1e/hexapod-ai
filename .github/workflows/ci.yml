@@ -55,6 +55,7 @@ jobs:
           pip install jax[cpu] jaxlib
           # optax — JAX optimizer for discriminator training
           pip install optax
+          pip install flax
           pip install -r requirements.txt
           pip install pytest
 
