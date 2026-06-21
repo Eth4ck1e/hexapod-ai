@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.ruff]
+# Target Python 3.10+ (matching requirements.txt compat)
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "N", "SIM"]
+ignore = [
+    "E501",  # line too long — line-length handles this
+    "N802",  # allow function names with capitals (JAX conventions like `_compute_reward`)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["INP001"]  # scripts aren't packages, no __init__.py needed
+"tests/*" = ["S101"]      # allow bare `assert` in tests
+
+[tool.ruff.format]
+quote-style = "double"
