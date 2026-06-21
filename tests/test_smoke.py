@@ -6,6 +6,7 @@ Or standalone:  python -m pytest tests/test_smoke.py -v --no-header
 Sets MUJOCO_GL=egl for headless CI (GitHub Actions ubuntu-latest).
 """
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -57,7 +58,7 @@ def test_import_amp_discriminator():
 
 mjx_available = pytest.mark.skipif(
     not importlib.util.find_spec("mujoco.mjx"),
-    reason="mujoco.mjx not available on this platform",
+    reason="mujoco.mjx not available on this platform (needs JAX backend)",
 )
 
 
