@@ -30,11 +30,17 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
+          # MuJoCo headless CI needs: EGL/OpenGL libs + patchelf.
+          # libgl1-mesa-glx was the traditional name; newer Ubuntu uses libgl1.
+          # Install both EGL (for MUJOCO_GL=egl) and GLX backends for compat.
           sudo apt-get install -y -qq \
-            libgl1-mesa-glx \
+            libgl1 \
+            libegl1 \
+            libgles2 \
             libglu1-mesa \
             libglew-dev \
-            patchelf
+            patchelf \
+            --no-install-recommends
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
