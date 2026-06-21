@@ -31,8 +31,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           # MuJoCo headless CI needs: EGL/OpenGL libs + patchelf.
-          # libgl1-mesa-glx was the traditional name; newer Ubuntu uses libgl1.
-          # Install both EGL (for MUJOCO_GL=egl) and GLX backends for compat.
           sudo apt-get install -y -qq \
             libgl1 \
             libegl1 \
@@ -55,6 +53,8 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           # CPU-only JAX — needed by amp/ and envs/ modules
           pip install jax[cpu] jaxlib
+          # optax — JAX optimizer for discriminator training
+          pip install optax
           pip install -r requirements.txt
           pip install pytest
 
