@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -65,7 +64,6 @@ from gait.controller import (
     FEMUR_LENGTH,
     LEG_BODY_YAW,
     LEG_NAMES,
-    NEUTRAL_POSE,
     TIBIA_LENGTH,
     Controller,
 )

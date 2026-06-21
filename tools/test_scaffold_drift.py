@@ -18,8 +18,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import mujoco
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gait.controller import Controller
@@ -92,11 +92,11 @@ def run_drift_test(label: str, cmd: np.ndarray, model_path: str,
     print(f"  final yaw:      {final_yaw_deg:+.2f} deg")
     print(f"  drift rate:     {yaw_per_m:+.2f} deg/m  ({final_yaw_deg/duration:+.2f} deg/sec)")
     if abs(final_yaw_deg) < 2.0:
-        print(f"  -> CLEAN: < 2° total drift")
+        print("  -> CLEAN: < 2° total drift")
     elif abs(final_yaw_deg) < 10.0:
-        print(f"  -> SMALL drift")
+        print("  -> SMALL drift")
     else:
-        print(f"  -> SIGNIFICANT drift -- scaffold contributes to policy drift")
+        print("  -> SIGNIFICANT drift -- scaffold contributes to policy drift")
     return yaws_at_t
 
 

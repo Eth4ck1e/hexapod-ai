@@ -36,20 +36,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from collections import OrderedDict
 from pathlib import Path
 
-import numpy as np
 import mujoco
+import numpy as np
 
 # Allow importing the gait package from the repo root.
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from gait import NEUTRAL_POSE  # noqa: E402
 from gait.controller import _joint_signs  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Configuration

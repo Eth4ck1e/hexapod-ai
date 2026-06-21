@@ -27,7 +27,6 @@ stdout so you can scrub through the log in the morning.
 """
 from __future__ import annotations
 
-import platform
 import subprocess
 import sys
 import time
@@ -94,8 +93,8 @@ def main() -> None:
     print(f"\n{'='*70}")
     print(f"[{_now()}] CURRICULUM COMPLETE in {elapsed_h:.1f} hours")
     print(f"{'='*70}")
-    print(f"\nFinal policy is the latest checkpoint matching BASE_NAME's prefix.")
-    print(f"Watch with:  python watch_demo_jax.py")
+    print("\nFinal policy is the latest checkpoint matching BASE_NAME's prefix.")
+    print("Watch with:  python watch_demo_jax.py")
 
 
 if __name__ == "__main__":

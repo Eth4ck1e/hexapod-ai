@@ -14,19 +14,23 @@ Numerical parity with the numpy controller is validated sub-mm in the
 `__main__` block at the bottom of this file (run as a script).
 """
 
-from typing import NamedTuple, Tuple
 import math
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 
 from gait.controller import (
-    Controller,
-    LEG_PHASE       as _LEG_PHASE_NP,
-    COXA_POS_BODY   as _COXA_POS_BODY_NP,
     COXA_LENGTH,
     FEMUR_LENGTH,
     TIBIA_LENGTH,
+    Controller,
+)
+from gait.controller import (
+    COXA_POS_BODY as _COXA_POS_BODY_NP,
+)
+from gait.controller import (
+    LEG_PHASE as _LEG_PHASE_NP,
 )
 
 
@@ -246,7 +250,7 @@ def predict(params: GaitParams, cmd: jnp.ndarray, t) -> jnp.ndarray:
     return _joints_from_feet_coxa(feet_coxa, params)
 
 
-def predict_with_feet(params: GaitParams, cmd: jnp.ndarray, t) -> Tuple[jnp.ndarray, jnp.ndarray]:
+def predict_with_feet(params: GaitParams, cmd: jnp.ndarray, t) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Same cost as predict(): returns (joints_18, feet_body_6x3)."""
     feet_coxa = _compute_foot_targets_coxa(params, cmd, t)
     joints    = _joints_from_feet_coxa(feet_coxa, params)
@@ -263,8 +267,9 @@ if __name__ == "__main__":
     # for the actually-relevant performance numbers.
     jax.config.update("jax_enable_x64", True)
 
-    import numpy as np
     import time
+
+    import numpy as np
 
     MODEL_PATH = "models/phantomx_simple.xml"
 

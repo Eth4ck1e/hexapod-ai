@@ -23,14 +23,14 @@ Usage examples (Windows venv):
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import mujoco
 import mujoco.viewer
+import numpy as np
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gait.controller import Controller
 
@@ -419,7 +419,7 @@ def main():
                 if slack > 0:
                     time.sleep(slack)
 
-    print(f"[scaffold] done.")
+    print("[scaffold] done.")
 
 
 if __name__ == "__main__":

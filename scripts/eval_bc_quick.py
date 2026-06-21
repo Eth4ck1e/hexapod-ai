@@ -17,25 +17,28 @@ import math
 import pickle
 import time
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 # Enable persistent JAX compilation cache before any JAX op runs.
 from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
+from brax.training.agents.ppo.networks import make_ppo_networks
+from chain_train import (
+    ACTION_SPACE as CHAIN_ACTION_SPACE,
+)
 
-from envs.hexapod_env import HexapodEnv
-from watch_demo_jax import _patch_obs_to_jax
 # Pull session config defaults so eval defaults match training defaults.
 from chain_train import (
-    BASE_NAME    as CHAIN_BASE_NAME,
-    ACTION_SPACE as CHAIN_ACTION_SPACE,
-    MODEL_PATH   as CHAIN_MODEL_PATH,
+    MODEL_PATH as CHAIN_MODEL_PATH,
 )
+from watch_demo_jax import _patch_obs_to_jax
+
+from envs.hexapod_env import HexapodEnv
 
 
 def main():
@@ -106,7 +109,7 @@ def main():
     amp_disc_params = None
     amp_score_fn = None
     if args.amp_discriminator is not None:
-        from amp.discriminator import Discriminator, style_reward, STATE_DIM, TRANSITION_DIM
+        from amp.discriminator import Discriminator
         with open(args.amp_discriminator, "rb") as f:
             amp_disc_params = pickle.load(f)
         amp_disc_module = Discriminator()
@@ -226,7 +229,7 @@ def main():
 
     elapsed = time.perf_counter() - t0
     print(f"\n  ran {args.episodes} eps in {elapsed:.1f}s ({sum(lengths)} env steps)")
-    print(f"  ----- summary -----")
+    print("  ----- summary -----")
     print(f"  mean episode reward  : {np.mean(rewards):+8.2f}  +/- {np.std(rewards):.2f}")
     print(f"  mean episode length  : {np.mean(lengths):4.0f} / {args.max_steps}  ({100*np.mean(lengths)/args.max_steps:.0f}%)")
     print(f"  fell rate            : {sum(fells)}/{args.episodes}  ({100*sum(fells)/args.episodes:.0f}%)")
@@ -234,7 +237,7 @@ def main():
     if amp_score_fn is not None:
         print(f"  mean per-step AMP discriminator score: {np.mean(amp_scores):+.3f}  "
               f"(+1 = looks like prior, -1 = policy garbage)")
-    print(f"\n  per-step penalty breakdown (mean across episodes):")
+    print("\n  per-step penalty breakdown (mean across episodes):")
     for k in sorted(pen_breakdown.keys()):
         print(f"    {k:<22}: {pen_breakdown[k]/args.episodes:+.4f}")
 

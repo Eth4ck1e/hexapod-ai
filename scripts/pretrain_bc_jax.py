@@ -26,7 +26,6 @@ Run inside WSL2:
 from __future__ import annotations
 
 import argparse
-import functools
 import math
 import pickle
 import time
@@ -38,18 +37,19 @@ import optax
 
 # Enable persistent JAX compilation cache before any JAX op runs.
 from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics, specs
-
-from envs.hexapod_brax_env import HexapodBraxEnv
-
+from brax.training.agents.ppo.networks import make_ppo_networks
 
 # ============================================================================
 # CONFIG
 # ============================================================================
-from chain_train import MODEL_PATH, NUM_ENVS      # SoT for paths + VRAM budget
+from chain_train import MODEL_PATH, NUM_ENVS  # SoT for paths + VRAM budget
+
+from envs.hexapod_brax_env import HexapodBraxEnv
+
 OUT_DIR       = Path("checkpoints") / "bc_pretrained_jax"
 
 # Demo collection — at 564k SPS this is fast.

@@ -10,6 +10,7 @@ from pathlib import Path
 # MUST come before importing casadi.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _hsl_bootstrap import HSL_AVAILABLE
+
 print(f"HSL bootstrap: available={HSL_AVAILABLE}")
 
 import to_solver as ts

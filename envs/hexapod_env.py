@@ -60,14 +60,13 @@ import math
 import os
 from multiprocessing import shared_memory
 
-import numpy as np
 import gymnasium as gym
-from gymnasium import spaces
 import mujoco
 import mujoco.viewer
+import numpy as np
+from gymnasium import spaces
 
-from gait import Controller, NEUTRAL_POSE
-
+from gait import Controller
 
 # Shared-memory name for the env-0 → live_viewer.py state mirror. The training
 # process's env-0 worker writes qpos+qvel+sim_time here every step; a separate

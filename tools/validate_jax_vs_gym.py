@@ -21,11 +21,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# Gym side.
-from envs.hexapod_env import HexapodEnv
 # JAX side.
 from envs import hexapod_env_jax as hex_jax
 
+# Gym side.
+from envs.hexapod_env import HexapodEnv
 
 MODEL_PATH = "models/phantomx_simple_mjx.xml"
 N_STEPS    = 200          # ~1 sec at dt=0.005 — enough to land + take steps
@@ -125,7 +125,7 @@ def main() -> None:
           f"jax_done={jax_dones[:n].any()}")
 
     # Per-step reward profile (first 10, last 10).
-    print(f"\n  per-step reward (gym | jax | diff):")
+    print("\n  per-step reward (gym | jax | diff):")
     for i in list(range(min(5, n))) + (
             list(range(max(5, n-5), n)) if n > 10 else []):
         d = gym_rewards[i] - jax_rewards[i]

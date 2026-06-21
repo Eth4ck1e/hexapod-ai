@@ -14,7 +14,6 @@ Obs layout (slot → dim) — order matters; both envs must emit this exact orde
 """
 from collections import OrderedDict
 
-
 # Order matters — both envs concat in this exact sequence.
 OBS_SLOT_DIMS: "OrderedDict[str, int]" = OrderedDict([
     ("joint_pos",       18),     # qpos[7:25]

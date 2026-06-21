@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint with Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check --output-format=github
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          # MuJoCo headless CI needs: EGL/OpenGL libs + patchelf.
+          sudo apt-get install -y -qq \
+            libgl1 \
+            libegl1 \
+            libgles2 \
+            libglu1-mesa \
+            libglew-dev \
+            patchelf \
+            --no-install-recommends
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          # CPU-only PyTorch — no CUDA libs needed on CI runners.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # CPU-only JAX — needed by amp/ and envs/ modules
+          pip install jax[cpu] jaxlib
+          # optax — JAX optimizer for discriminator training
+          pip install optax
+          pip install flax
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run smoke test
+        run: |
+          MUJOCO_GL=egl python -m pytest tests/test_smoke.py -v
+        env:
+          MUJOCO_GL: egl

@@ -20,6 +20,7 @@ where motion ∈ [0,5], height ∈ [0,4], width ∈ [0,4].
 from __future__ import annotations
 
 import jax.numpy as jnp
+
 from envs.stance_envelope import HEIGHT_PRESETS, safe_dw_range
 
 # --- Cardinalities -----------------------------------------------------

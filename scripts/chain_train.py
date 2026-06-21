@@ -31,7 +31,6 @@ Run from PowerShell — it shells out to wsl for training itself.
 from __future__ import annotations
 
 import argparse
-import os
 import platform
 import shutil
 import subprocess
@@ -86,6 +85,7 @@ def enable_jax_cache(cache_dir: str = JAX_CACHE_DIR) -> None:
     JAX op runs (else the early ops will compile uncached and the env
     flags won't take effect)."""
     import os
+
     import jax
 
     # Persistent compilation cache — JIT'd functions persist across runs.
@@ -321,14 +321,14 @@ def main() -> None:
     print("=" * 70)
 
     if args.archive_old:
-        print(f"\narchiving non-matching logs/<dir> to logs_legacy/...")
+        print("\narchiving non-matching logs/<dir> to logs_legacy/...")
         n = archive_old_logs(args.prefix)
         print(f"  archived {n} dir(s).")
 
     # Bootstrap: if no checkpoint matches, run BC pretrain first.
     if find_latest_checkpoint(args.prefix) is None:
         print(f"\nno checkpoint matching checkpoints/{args.prefix}*/final/params.pkl")
-        print(f"running BC pretrain to bootstrap the lineage...")
+        print("running BC pretrain to bootstrap the lineage...")
         rc = run_pretrain(args.cmd_mask, args.action_space)
         if rc != 0:
             print(f"\nERROR: pretrain failed with exit code {rc}")

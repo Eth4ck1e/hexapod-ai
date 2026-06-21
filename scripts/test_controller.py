@@ -146,7 +146,7 @@ def main():
             pygame.quit()
         return
 
-    print(f"Move sticks / press buttons / press D-pad. Ctrl+C to exit.\n")
+    print("Move sticks / press buttons / press D-pad. Ctrl+C to exit.\n")
 
     # Snapshot initial state so we only print changes.
     last_axes    = [j.get_axis(i)   for i in range(n_axes)]

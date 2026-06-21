@@ -80,6 +80,7 @@ def main() -> None:
         jax.device_put_replicated = _device_put_replicated
 
     from brax.training.agents.ppo import train as ppo_train
+
     from envs.hexapod_brax_env import HexapodBraxEnv
 
     # ---- progress_fn: smart-timer steady-state SPS -------------------------

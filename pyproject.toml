@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.ruff]
+# Target Python 3.10+ (matching requirements.txt compat)
+target-version = "py310"
+line-length = 100
+
+# Only check active source directories — legacy/, snapshots/, viz/ have
+# pre-existing patterns that are intentionally un-linted.
+exclude = ["legacy", "snapshots", "viz", "media", "vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "N", "SIM"]
+ignore = [
+    "E402",   # module-level import not at top — common in JAX code (cache, backend)
+    "E501",   # line too long — line-length setting handles formatting
+    "E701",   # multiple statements on one line (colon) — compact style in controller scripts
+    "E702",   # multiple statements on one line (semicolon) — JAX/scientific compact style
+    "E741",   # ambiguous variable name — single-letter names are standard in math
+    "F841",   # unused variable — kept for documentation/debugging in research code
+    "N801",   # class name case — many convention names in viz/manim
+    "N802",   # function name case — scientific code uses caps for constants
+    "N803",   # argument name case — rotation matrices, quaternions etc
+    "N806",   # variable in function should be lowercase — scientific style
+    "SIM102", # nested if statements — readability preference
+    "SIM103", # return condition directly — explicit style
+    "SIM105", # contextlib.suppress — explicit try/except is clearer
+    "SIM108", # ternary instead of if-else — readability preference
+    "SIM114", # Combine `if` branches — readability preference
+    "SIM117", # nested with statements — readability
+    "UP015",  # unnecessary open mode — explicit mode is clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["INP001"]  # scripts aren't packages, no __init__.py needed
+"tests/*" = ["I001", "S101"]      # allow bare `assert` in tests
+
+[tool.ruff.format]
+quote-style = "double"

@@ -19,22 +19,24 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 import pickle
 import sys
 import types
 from pathlib import Path
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from chain_train import enable_jax_cache, ACTION_SPACE as CHAIN_ACTION_SPACE, MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
+from chain_train import MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
+from brax.training.agents.ppo.networks import make_ppo_networks
 
 from envs.hexapod_env import HexapodEnv
 
@@ -165,7 +167,7 @@ def main():
     actual_mag = (actual_vx**2 + actual_vy**2) ** 0.5
     track_pct = 100.0 * actual_mag / cmd_mag if cmd_mag > 1e-6 else 0.0
 
-    print(f"\n=== RESULTS ===")
+    print("\n=== RESULTS ===")
     print(f"Commanded:  vx={target_vx:+.4f}  vy={target_vy:+.4f}  mag={cmd_mag:.4f}")
     print(f"Actual avg: vx={actual_vx:+.4f}  vy={actual_vy:+.4f}  mag={actual_mag:.4f}")
     print(f"Tracking:   {track_pct:.1f}% of commanded")

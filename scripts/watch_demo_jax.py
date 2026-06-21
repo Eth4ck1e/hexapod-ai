@@ -29,36 +29,38 @@ import pickle
 import sys
 import time
 
-import numpy as np
-
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 # Enable persistent JAX compilation cache before any JAX op runs.
 from chain_train import enable_jax_cache
+
 enable_jax_cache()
 
-from brax.training.agents.ppo.networks import make_ppo_networks
 from brax.training.acme import running_statistics
-
-from envs.hexapod_env import HexapodEnv
-
-# Shared cmd-vector demo script lives at scripts/demo_phases.py — both
-# this active JAX viewer and the legacy SB3 watch_demo.py import from it.
-from demo_phases import (
-    DEMO_PHASES, DEMO_PHASES_PAPER, DEMO_PHASES_PAPER_STANCE,
-    DEMO_PHASES_SHOWCASE,
-    INTERACTIVE_TESTS, print_interactive_help,
-)
+from brax.training.agents.ppo.networks import make_ppo_networks
+from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
 
 # Pull session config from chain_train.py so watch defaults stay in
 # sync with the lineage you're training. Edit BASE_NAME / ACTION_SPACE
 # in chain_train.py, both scripts pick it up automatically.
 from chain_train import BASE_NAME as CHAIN_BASE_NAME
-from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
 from chain_train import MODEL_PATH as CHAIN_MODEL_PATH
 from chain_train import RENDER_MODEL_PATH as CHAIN_RENDER_MODEL_PATH
 
+# Shared cmd-vector demo script lives at scripts/demo_phases.py — both
+# this active JAX viewer and the legacy SB3 watch_demo.py import from it.
+from demo_phases import (
+    DEMO_PHASES,
+    DEMO_PHASES_PAPER,
+    DEMO_PHASES_PAPER_STANCE,
+    DEMO_PHASES_SHOWCASE,
+    INTERACTIVE_TESTS,
+    print_interactive_help,
+)
+
+from envs.hexapod_env import HexapodEnv
 
 # _patch_obs_to_jax monkey-patch removed 2026-05-12 — the gym env now
 # uses the shared envs/obs_layout.py module so it produces the same obs
@@ -245,7 +247,7 @@ def main():
     else:
         params_path = latest_jax_params()
     if params_path is None or not os.path.exists(params_path):
-        print(f"No JAX params.pkl found. Pass --params/--lineage/--bc or train first.")
+        print("No JAX params.pkl found. Pass --params/--lineage/--bc or train first.")
         sys.exit(1)
     print(f"Loading params: {params_path}")
     with open(params_path, "rb") as f:
@@ -366,7 +368,7 @@ def main():
                 # Restart the active test from t=0 so the cmd schedule
                 # picks up cleanly post-reset.
                 active_test_t0[0] = time.time()
-                print(f"  >>> [r] RESET bot to neutral pose")
+                print("  >>> [r] RESET bot to neutral pose")
                 return
             if ch == "p":
                 print(f"  bot world pos = "
@@ -418,7 +420,7 @@ def main():
     print(f"gait_scale:  {env.gait_scale:.2f}")
     print(f"Action mode: {'stochastic' if args.stochastic else 'deterministic'}")
     if args.interactive:
-        print(f"Mode:        INTERACTIVE (keyboard-driven, default test = [1])")
+        print("Mode:        INTERACTIVE (keyboard-driven, default test = [1])")
     else:
         print(f"Demo:        {args.demo} schedule, {len(demo_phases)} phases, {total_dur:.0f}s per loop")
     print(f"MAX_SPEED:   {env._ctrl.MAX_SPEED:.4f} m/s")

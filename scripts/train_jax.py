@@ -17,17 +17,17 @@ from __future__ import annotations
 
 import argparse
 import functools
-import os
 import pickle
 import time
 from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-from tensorboardX import SummaryWriter
 
 # Enable persistent JAX compilation cache before any JAX op runs.
 from chain_train import enable_jax_cache
+from tensorboardX import SummaryWriter
+
 enable_jax_cache()
 
 # JAX 0.10 removed `device_put_replicated` but Brax 0.14.2 still calls it.
@@ -44,13 +44,12 @@ if not hasattr(jax, "device_put_replicated"):
 
 from brax.training.agents.ppo import train as ppo_train
 
-from envs.hexapod_brax_env import HexapodBraxEnv
-
-
 # ============================================================================
 # CONFIG
 # ============================================================================
-from chain_train import MODEL_PATH      # one source of truth
+from chain_train import MODEL_PATH  # one source of truth
+
+from envs.hexapod_brax_env import HexapodBraxEnv
 
 RUN_NAME       = "mjx_smoke"
 
@@ -235,7 +234,7 @@ def main() -> None:
         curriculum = CURRICULUM
 
     print("=" * 70)
-    print(f"JAX-MJX hexapod training")
+    print("JAX-MJX hexapod training")
     print(f"  run:        {args.run}")
     print(f"  model:      {MODEL_PATH}")
     print(f"  num_envs:   {args.num_envs}")

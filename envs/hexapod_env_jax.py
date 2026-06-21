@@ -20,17 +20,16 @@ Mirrors the SubprocVecEnv `HexapodEnv` reward + termination + obs:
 Stage is fixed to 3 (full motion cmd mask) for now.
 """
 
-from typing import NamedTuple
 import math
+from typing import NamedTuple
 
-import numpy as np
 import jax
 import jax.numpy as jnp
 import mujoco
 import mujoco.mjx as mjx
+import numpy as np
 
 from gait import controller_jax as gait_jax
-
 
 # ----------------------------------------------------------------------------
 # Stage 3 cmd mask + reward-track mask. Translation, yaw, height, width,
@@ -70,6 +69,7 @@ CMD_MASKS = {
 # bounds change, edit stance_envelope.py — env, watch tests, and tuner all
 # pick up the new values automatically.
 from envs import stance_envelope as _stance
+
 MAX_DW_INTERCEPT = jnp.float32(_stance.MAX_DW_INTERCEPT)
 MAX_DW_SLOPE     = jnp.float32(_stance.MAX_DW_SLOPE)
 MIN_DW_INTERCEPT = jnp.float32(_stance.MIN_DW_INTERCEPT)
