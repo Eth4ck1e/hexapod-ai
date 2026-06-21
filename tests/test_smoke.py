@@ -15,11 +15,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import numpy as np
 import pytest
-
 from envs.cmd_bins import cmd_to_bin
 from envs.obs_layout import OBS_DIM
 from envs.stance_envelope import safe_dw_range
-from gait import Controller, NEUTRAL_POSE
+from gait import NEUTRAL_POSE, Controller
 
 
 def test_import_gait():
