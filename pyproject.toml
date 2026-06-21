@@ -35,7 +35,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["INP001"]  # scripts aren't packages, no __init__.py needed
-"tests/*" = ["S101"]      # allow bare `assert` in tests
+"tests/*" = ["I001", "S101"]      # allow bare `assert` in tests
 
 [tool.ruff.format]
 quote-style = "double"
