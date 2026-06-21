@@ -1,7 +1,6 @@
 """Quick smoke test for CI: verify all critical imports + MuJoCo model loading.
 
 Run with:  python -m pytest tests/test_smoke.py -v
-Or standalone:  python -m pytest tests/test_smoke.py -v --no-header
 
 Sets MUJOCO_GL=egl for headless CI (GitHub Actions ubuntu-latest).
 """
@@ -26,18 +25,21 @@ sys.path.insert(0, str(PROJECT_ROOT))
 def test_import_gait():
     """gait package and Controller class."""
     from gait import Controller  # noqa: F811
+
     assert hasattr(Controller, "predict")
 
 
 def test_import_envs_obs_layout():
     """envs.obs_layout — single source of truth for obs schema."""
     from envs.obs_layout import OBS_DIM  # noqa: F811
+
     assert OBS_DIM > 10
 
 
 def test_import_envs_stance_envelope():
     """envs.stance_envelope — stance height/width envelope."""
     from envs.stance_envelope import safe_dw_range  # noqa: F811
+
     lo, hi = safe_dw_range(-0.025)
     assert lo < hi
 
@@ -46,6 +48,7 @@ def test_import_envs_cmd_bins():
     """envs.cmd_bins — 150-bin partition for multi-head disc."""
     import numpy as np
     from envs.cmd_bins import cmd_to_bin  # noqa: F811
+
     idx = cmd_to_bin(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     assert 0 <= idx < 150
 
@@ -53,6 +56,7 @@ def test_import_envs_cmd_bins():
 def test_import_amp_discriminator():
     """amp.discriminator — multi-head discriminator."""
     from amp.discriminator import MultiHeadDiscriminator  # noqa: F811
+
     assert hasattr(MultiHeadDiscriminator, "__call__")
 
 
@@ -66,6 +70,7 @@ mjx_available = pytest.mark.skipif(
 def test_import_amp_prior_data():
     """amp.prior_data — prior collection."""
     from amp.prior_data import collect_demos  # noqa: F811
+
     assert callable(collect_demos)
 
 
@@ -79,6 +84,7 @@ def mujoco_available():
     """Verify MuJoCo can import and we have a usable GL backend on CI."""
     os.environ.setdefault("MUJOCO_GL", "egl")  # headless rendering backend
     import mujoco
+
     return mujoco
 
 
@@ -118,6 +124,7 @@ def test_mujoco_step(mujoco_available):
 def test_controller_init():
     """Controller initialises with the production MJCF."""
     from gait import Controller
+
     model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
     ctrl = Controller(model_path)
     assert ctrl.MAX_SPEED > 0
@@ -128,6 +135,7 @@ def test_controller_predict():
     """Controller.predict produces correct joint shape."""
     import numpy as np
     from gait import Controller
+
     model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
     ctrl = Controller(model_path)
     cmd = np.array([0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
@@ -142,4 +150,5 @@ def test_controller_predict():
 def test_controller_neutral_pose():
     """gait.NEUTRAL_POSE constant is accessible."""
     from gait import NEUTRAL_POSE
+
     assert len(NEUTRAL_POSE) == 18
