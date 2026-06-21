@@ -8,6 +8,11 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure project root is on PYTHONPATH before first-party imports.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import numpy as np
 import pytest
 
@@ -15,10 +20,6 @@ from envs.cmd_bins import cmd_to_bin
 from envs.obs_layout import OBS_DIM
 from envs.stance_envelope import safe_dw_range
 from gait import Controller, NEUTRAL_POSE
-
-# Ensure project root is on PYTHONPATH so `from envs import ...` works
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def test_import_gait():
@@ -80,17 +81,17 @@ def test_mujoco_import(mujoco_available):
 
 def test_mujoco_model_load(mujoco_available):
     """Load the main MJCF model and verify geometry."""
-    model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
+    model_path = str(_PROJECT_ROOT / "models" / "phantomx.xml")
     assert os.path.exists(model_path), f"MJCF not found: {model_path}"
     model = mujoco_available.MjModel.from_xml_path(model_path)
-    assert model.nq > 0, "model has no position DOFs"
-    assert model.nv > 0, "model has no velocity DOFs"
+    assert model.nq > 0
+    assert model.nv > 0
     assert model.nu == 18, f"expected 18 actuators, got {model.nu}"
 
 
 def test_mujoco_step(mujoco_available):
     """Step the physics forward one tick — validates solver + geometry."""
-    model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
+    model_path = str(_PROJECT_ROOT / "models" / "phantomx.xml")
     model = mujoco_available.MjModel.from_xml_path(model_path)
     data = mujoco_available.MjData(model)
     mujoco_available.mj_step(model, data)
@@ -99,7 +100,7 @@ def test_mujoco_step(mujoco_available):
 
 def test_controller_init():
     """Controller initialises with the production MJCF."""
-    model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
+    model_path = str(_PROJECT_ROOT / "models" / "phantomx.xml")
     ctrl = Controller(model_path)
     assert ctrl.MAX_SPEED > 0
     assert ctrl.MAX_YAW_RATE > 0
@@ -107,7 +108,7 @@ def test_controller_init():
 
 def test_controller_predict():
     """Controller.predict produces correct joint shape."""
-    model_path = str(PROJECT_ROOT / "models" / "phantomx.xml")
+    model_path = str(_PROJECT_ROOT / "models" / "phantomx.xml")
     ctrl = Controller(model_path)
     cmd = np.array([0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
     joints = ctrl.predict(cmd, 0.0)
