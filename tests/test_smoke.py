@@ -120,3 +120,45 @@ def test_controller_predict():
 def test_controller_neutral_pose():
     """gait.NEUTRAL_POSE constant is accessible."""
     assert len(NEUTRAL_POSE) == 18
+
+
+# ---------------------------------------------------------------------------
+# Robot profiles (gait/robot_profile.py)
+# ---------------------------------------------------------------------------
+def test_profile_registry():
+    """PhantomX is registered, is the default, and resolves by name."""
+    from gait import DEFAULT_PROFILE, PHANTOMX, get_profile
+
+    assert get_profile("phantomx") is PHANTOMX
+    assert get_profile(None) is DEFAULT_PROFILE
+    with pytest.raises(KeyError):
+        get_profile("no_such_robot")
+
+
+def test_profile_inferred_from_model_path():
+    """Controller(model_path) picks the profile from the MJCF filename."""
+    from gait import profile_for_model
+
+    assert profile_for_model("models/phantomx.xml").name == "phantomx"
+    assert profile_for_model("/abs/dir/phantomx_simple_mjx.xml").name == "phantomx"
+    with pytest.warns(UserWarning):
+        assert profile_for_model("models/unknown_bot.xml").name == "phantomx"
+
+
+def test_controller_default_and_explicit_profile_agree():
+    """Controller() (no args), Controller(path) and Controller(profile=...)
+    must produce identical gait output for the same MJCF."""
+    model_path = str(_PROJECT_ROOT / "models" / "phantomx_simple_mjx.xml")
+    a = Controller()
+    b = Controller(model_path)
+    c = Controller(model_path, profile="phantomx")
+    assert a.profile.name == b.profile.name == c.profile.name == "phantomx"
+    cmd = np.array([0.1, 0.05, 0.3, 0.05, -0.05, -0.01, 0.01, 0.0, 0.0])
+    ja, jb, jc = (x.predict(cmd, 1.234) for x in (a, b, c))
+    np.testing.assert_array_equal(ja, jb)
+    np.testing.assert_array_equal(jb, jc)
+    # Bare module constants still mirror the PhantomX profile.
+    from gait import COXA_LENGTH, FEMUR_LENGTH, TIBIA_LENGTH
+
+    lengths = (a.profile.coxa_length, a.profile.femur_length, a.profile.tibia_length)
+    assert lengths == (COXA_LENGTH, FEMUR_LENGTH, TIBIA_LENGTH)

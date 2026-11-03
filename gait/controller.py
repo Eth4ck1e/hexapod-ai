@@ -4,7 +4,8 @@ gait.controller — stateful hexapod gait controller (closed-form IK + overlays)
 Public API (used by simple_gait, IK_gait, envs/hexapod_env, eventual ESP32-S3
 firmware):
 
-    ctrl = Controller("models/phantomx.xml")
+    ctrl = Controller()                        # PhantomX (default profile)
+    ctrl = Controller(profile="mini_hexapod")  # any registered RobotProfile
     ctrl.set_cmd(cmd_9d)
     joints = ctrl.step(dt)
         # OR:
@@ -48,86 +49,63 @@ swing, no lift) and feet rest at their stance-modulated, tilted positions.
 """
 
 import math
+from pathlib import Path
 
 import mujoco
 import numpy as np
 
+from .robot_profile import (  # noqa: F401 — re-exported for callers
+    DEFAULT_PROFILE,
+    LEG_NAMES,
+    PHANTOMX,
+    RobotProfile,
+    get_profile,
+    profile_for_model,
+)
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # ============================================================================
-# Constants used by both Controller and external callers
+# Backward-compatible module constants = PhantomX profile values.
+# New code should read ctrl.profile.<field>; these exist so tools that import
+# the bare constants (tools/to_solver.py, derive_joint_limits.py, ...) keep
+# working. They are NOT used by Controller itself any more.
 # ============================================================================
-LEG_NAMES = ["RR", "RM", "RF", "LR", "LM", "LF"]
-
-# Body-frame yaw of each coxa, derived from coxa quats in models/phantomx.xml.
-LEG_BODY_YAW = np.array([
-    -math.radians(135), -math.radians(90), -math.radians(45),
-    +math.radians(135), +math.radians(90), +math.radians(45),
-])
-
-# Coxa joint position in body frame.
-COXA_POS_BODY = np.array([
-    [-0.12, -0.06, 0.0],   # RR
-    [ 0.00, -0.10, 0.0],   # RM
-    [ 0.12, -0.06, 0.0],   # RF
-    [-0.12, +0.06, 0.0],   # LR
-    [ 0.00, +0.10, 0.0],   # LM
-    [ 0.12, +0.06, 0.0],   # LF
-])
-
-# Tripod phase offsets per leg (group A in sync, group B 180° offset).
-LEG_PHASE = np.array([0.0, 0.5, 0.0, 0.5, 0.0, 0.5])
-
-# PhantomX link lengths (from MJCF).
-COXA_LENGTH  = 0.052
-FEMUR_LENGTH = 0.065
-# Effective tibia length = distance from tibia joint to actual foot tip.
-# Foot tip sits at (0.134, 0.031, 0.0) in tibia-local frame, magnitude 0.138.
-TIBIA_LENGTH = 0.138
-
-# NEUTRAL_POSE — joint configuration matching the calibrated (un-widened) foot
-# rest. Hardcoded so the library has zero dependency on envs/. Used as the
-# anchor for the formula→MJCF offset calibration; the runtime gait neutral
-# (with stance widening applied) is derived from this and exposed via
-# Controller.gait_neutral_pose.
-NEUTRAL_POSE = np.array([
-     0.0, -0.21818873, -0.32188801,    # RR
-     0.0, -0.24918906, -0.26150113,    # RM
-     0.0, -0.21818873, -0.32188801,    # RF
-     0.0,  0.21818873,  0.32188801,    # LR
-     0.0,  0.24918906,  0.26150113,    # LM
-     0.0,  0.21818873,  0.32188801,    # LF
-])
+LEG_BODY_YAW  = PHANTOMX.leg_body_yaw
+COXA_POS_BODY = PHANTOMX.coxa_pos_body
+LEG_PHASE     = PHANTOMX.leg_phase
+COXA_LENGTH   = PHANTOMX.coxa_length
+FEMUR_LENGTH  = PHANTOMX.femur_length
+TIBIA_LENGTH  = PHANTOMX.tibia_length
+NEUTRAL_POSE  = PHANTOMX.neutral_pose
 
 
 # ============================================================================
 # Closed-form IK helpers (module-level for testing + reuse)
 # ============================================================================
-def _joint_signs(leg_idx):
-    """Per-joint sign mapping from formula convention to MJCF joint angles.
-    Coxa: +1 always. Femur: +1 right, -1 left (axis flipped). Tibia: -1 right,
-    +1 left (axis flipped AND formula bend direction is opposite of MJCF positive
-    rotation around the tibia axis). See docs/kinematics.md for derivation.
+def _joint_signs(leg_idx, profile=None):
+    """Per-joint sign mapping (coxa, femur, tibia) from formula convention to
+    MJCF joint angles for one leg. Comes from the robot profile; PhantomX:
+    coxa +1 always, femur +1 right / -1 left, tibia -1 right / +1 left.
+    See docs/kinematics.md for the derivation.
     """
-    is_left = leg_idx >= 3
-    return (
-        +1.0,
-        -1.0 if is_left else +1.0,
-        +1.0 if is_left else -1.0,
-    )
+    profile = profile or DEFAULT_PROFILE
+    return tuple(float(v) for v in profile.joint_signs[leg_idx])
 
 
-def _ik_raw(fx, fy, fz):
+def _ik_raw(fx, fy, fz, L1=COXA_LENGTH, L2=FEMUR_LENGTH, L3=TIBIA_LENGTH):
     """Closed-form 3-link IK in geometric (pre-MJCF-offset) convention.
-    Single-leg version. Input: foot target in coxa-local frame. Returns
-    (coxa, femur, tibia) raw."""
+    Single-leg version. Input: foot target in coxa-local frame; link lengths
+    (coxa, femur, tibia) default to PhantomX. Returns (coxa, femur, tibia) raw."""
     coxa = math.atan2(fy, fx)
     r    = math.hypot(fx, fy)
-    x_fp = r - COXA_LENGTH
+    x_fp = r - L1
     z_fp = fz
     D    = math.hypot(x_fp, z_fp)
-    D = min(D, FEMUR_LENGTH + TIBIA_LENGTH - 1e-6)
-    D = max(D, abs(FEMUR_LENGTH - TIBIA_LENGTH) + 1e-6)
-    cos_a = (FEMUR_LENGTH**2 + D**2 - TIBIA_LENGTH**2) / (2 * FEMUR_LENGTH * D)
-    cos_g = (FEMUR_LENGTH**2 + TIBIA_LENGTH**2 - D**2) / (2 * FEMUR_LENGTH * TIBIA_LENGTH)
+    D = min(D, L2 + L3 - 1e-6)
+    D = max(D, abs(L2 - L3) + 1e-6)
+    cos_a = (L2**2 + D**2 - L3**2) / (2 * L2 * D)
+    cos_g = (L2**2 + L3**2 - D**2) / (2 * L2 * L3)
     cos_a = max(-1.0, min(1.0, cos_a))
     cos_g = max(-1.0, min(1.0, cos_g))
     alpha = math.acos(cos_a)
@@ -139,22 +117,23 @@ def _ik_raw(fx, fy, fz):
     return coxa, femur, tibia
 
 
-def _ik_raw_batch(feet_coxa):
+def _ik_raw_batch(feet_coxa, L1=COXA_LENGTH, L2=FEMUR_LENGTH, L3=TIBIA_LENGTH):
     """Vectorized closed-form IK over all 6 legs at once.
-    Input: (6, 3) array of foot targets in each leg's coxa-local frame.
+    Input: (6, 3) array of foot targets in each leg's coxa-local frame; link
+    lengths (coxa, femur, tibia) default to PhantomX.
     Returns: (6, 3) array of (coxa, femur, tibia) raw angles."""
     fx = feet_coxa[:, 0]
     fy = feet_coxa[:, 1]
     fz = feet_coxa[:, 2]
     coxa = np.arctan2(fy, fx)
     r    = np.hypot(fx, fy)
-    x_fp = r - COXA_LENGTH
+    x_fp = r - L1
     z_fp = fz
     D    = np.hypot(x_fp, z_fp)
-    D = np.minimum(D, FEMUR_LENGTH + TIBIA_LENGTH - 1e-6)
-    D = np.maximum(D, abs(FEMUR_LENGTH - TIBIA_LENGTH) + 1e-6)
-    cos_a = (FEMUR_LENGTH**2 + D**2 - TIBIA_LENGTH**2) / (2 * FEMUR_LENGTH * D)
-    cos_g = (FEMUR_LENGTH**2 + TIBIA_LENGTH**2 - D**2) / (2 * FEMUR_LENGTH * TIBIA_LENGTH)
+    D = np.minimum(D, L2 + L3 - 1e-6)
+    D = np.maximum(D, abs(L2 - L3) + 1e-6)
+    cos_a = (L2**2 + D**2 - L3**2) / (2 * L2 * D)
+    cos_g = (L2**2 + L3**2 - D**2) / (2 * L2 * L3)
     np.clip(cos_a, -1.0, 1.0, out=cos_a)
     np.clip(cos_g, -1.0, 1.0, out=cos_g)
     alpha = np.arccos(cos_a)
@@ -171,9 +150,16 @@ def _ik_raw_batch(feet_coxa):
 class Controller:
     """Stateful hexapod gait controller — cmd → 18 joint angles.
 
-    Construction calibrates against the MJCF: detects foot tip via lowest-Z
-    mesh vertex, derives per-leg foot rest positions, anchors the closed-form
-    IK to MJCF joint conventions via NEUTRAL_POSE.
+    Robot-agnostic: all chassis-specific numbers come from a RobotProfile
+    (gait/robot_profile.py). Construction calibrates against the profile's
+    MJCF: detects the foot tip (named foot_<LEG> geom or lowest-Z mesh
+    vertex), derives per-leg foot rest positions, and anchors the
+    closed-form IK to MJCF joint conventions via profile.neutral_pose.
+
+        Controller()                              # PhantomX, default MJCF
+        Controller("models/phantomx.xml")         # profile inferred from filename
+        Controller(profile="mini_hexapod")        # another registered robot
+        Controller(profile=RobotProfile(...))     # ad-hoc profile
 
     Public read-only attributes (set by calibrate()):
         LEG_ORIGIN_BODY        (6, 3)  foot rest positions in body frame
@@ -199,10 +185,13 @@ class Controller:
     #     velocity (max practical ~3 rad/s under load).
     # 4 × 0.040 / 0.45 = 0.356 m/s ≈ 0.9 × theoretical hardware max (0.40 m/s).
     # See docs/MAX_SPEED_ANALYSIS.md for the servo-velocity derivation.
-    DEFAULT_GAIT_PERIOD     = 0.45
-    DEFAULT_PATH_RADIUS     = 0.040
-    DEFAULT_PATH_RES        = 100
-    DEFAULT_STANCE_WIDTH    = 0.015     # +15 mm outward per foot at neutral
+    # Class-level values are the PhantomX defaults (kept for callers that
+    # read Controller.DEFAULT_STANCE_WIDTH etc.). Each INSTANCE overrides
+    # these from its profile in __init__.
+    DEFAULT_GAIT_PERIOD     = PHANTOMX.gait_period
+    DEFAULT_PATH_RADIUS     = PHANTOMX.path_radius
+    DEFAULT_PATH_RES        = PHANTOMX.path_res
+    DEFAULT_STANCE_WIDTH    = PHANTOMX.stance_width     # +15 mm outward per foot at neutral
 
     # Turning-radius operational range for arc-aware turn-while-walking. When
     # both speed and wz are non-zero, the implied turn radius R = speed / |wz|
@@ -215,28 +204,46 @@ class Controller:
     # were trying to orbit a point right next to them, causing legs to converge
     # near body center. New MIN=0.250m puts the turn center safely outside the
     # body envelope. MAX shifted up by the same amount to preserve range width.
-    MIN_TURN_RADIUS         = 0.350    # m, ~1.3× body length (was 0.250)
-    MAX_TURN_RADIUS         = 0.755    # m, ~2.8× body length (was 0.655)
+    MIN_TURN_RADIUS         = PHANTOMX.min_turn_radius    # m, ~1.3× body length (was 0.250)
+    MAX_TURN_RADIUS         = PHANTOMX.max_turn_radius    # m, ~2.8× body length (was 0.655)
 
     # Calibrated speed ladder. Each level maps to a (gait_period, path_radius)
     # tuple that delivers the listed actual velocity in physics simulation
     # under ±1.5 N·m motor torque. Source: tools/scaffold_speed_calibration.csv
     # (49-combo sweep run 2026-05-07). Slip is 2-4 mm per stance at all levels;
     # levels ≥ 2.5 begin to saturate motor torque.
-    SPEED_LEVELS = {
-        0.5: {"gait_period": 1.50, "path_radius": 0.020},   # ~0.050 m/s
-        1.0: {"gait_period": 1.50, "path_radius": 0.030},   # ~0.077 m/s
-        1.5: {"gait_period": 1.50, "path_radius": 0.040},   # ~0.103 m/s
-        2.0: {"gait_period": 1.20, "path_radius": 0.040},   # ~0.128 m/s
-        2.5: {"gait_period": 1.00, "path_radius": 0.050},   # ~0.190 m/s
-        3.0: {"gait_period": 0.85, "path_radius": 0.060},   # ~0.261 m/s
-        3.5: {"gait_period": 0.75, "path_radius": 0.070},   # ~0.362 m/s
-    }
+    SPEED_LEVELS = PHANTOMX.speed_levels
 
-    def __init__(self, model_path,
+    def __init__(self, model_path=None, profile=None,
                  speed_level=None,
                  gait_period=None, path_radius=None, path_res=None,
                  default_stance_width=None):
+        # Resolve the robot profile first — every default below comes from it.
+        #   profile given (name or RobotProfile) → use it.
+        #   else model_path given                → infer from the MJCF filename.
+        #   else                                 → DEFAULT_PROFILE (PhantomX).
+        if isinstance(profile, str):
+            profile = get_profile(profile)
+        elif profile is None:
+            profile = (profile_for_model(model_path) if model_path is not None
+                       else DEFAULT_PROFILE)
+        self.profile = profile
+        if model_path is None:
+            model_path = str(_PROJECT_ROOT / profile.model_path)
+        self.DEFAULT_GAIT_PERIOD  = profile.gait_period
+        self.DEFAULT_PATH_RADIUS  = profile.path_radius
+        self.DEFAULT_PATH_RES     = profile.path_res
+        self.DEFAULT_STANCE_WIDTH = profile.stance_width
+        self.MIN_TURN_RADIUS      = profile.min_turn_radius
+        self.MAX_TURN_RADIUS      = profile.max_turn_radius
+        self.SPEED_LEVELS         = profile.speed_levels
+        # Link lengths + leg geometry (cached on the instance for the hot path).
+        self.L1 = float(profile.coxa_length)
+        self.L2 = float(profile.femur_length)
+        self.L3 = float(profile.tibia_length)
+        self._coxa_pos_body = profile.coxa_pos_body
+        self._leg_phase     = profile.leg_phase
+
         # speed_level resolves to (gait_period, path_radius) via SPEED_LEVELS.
         # Mutually exclusive with explicit gait_period / path_radius — pick one.
         if speed_level is not None:
@@ -263,13 +270,13 @@ class Controller:
         # Cached cos/sin for body→coxa rotation (one pair per leg, both as
         # tuples for legacy single-leg code AND as (6,) numpy arrays for
         # vectorized batch operations).
-        self._yaw_cs = [(math.cos(y), math.sin(y)) for y in LEG_BODY_YAW]
-        self._yaw_c  = np.array([math.cos(y) for y in LEG_BODY_YAW])   # (6,)
-        self._yaw_s  = np.array([math.sin(y) for y in LEG_BODY_YAW])   # (6,)
+        self._yaw_cs = [(math.cos(y), math.sin(y)) for y in profile.leg_body_yaw]
+        self._yaw_c  = np.array([math.cos(y) for y in profile.leg_body_yaw])   # (6,)
+        self._yaw_s  = np.array([math.sin(y) for y in profile.leg_body_yaw])   # (6,)
 
         # Per-joint sign matrix for vectorized IK→MJCF mapping. Shape (6, 3),
         # one row per leg, columns are (coxa_sign, femur_sign, tibia_sign).
-        self._joint_signs_array = np.array([_joint_signs(i) for i in range(6)])
+        self._joint_signs_array = np.array(profile.joint_signs, dtype=np.float64)
 
         # Working state.
         self._cmd = np.zeros(9, dtype=np.float64)
@@ -305,13 +312,14 @@ class Controller:
             for n in LEG_NAMES
         ])
 
-        # Set joints to NEUTRAL_POSE and run FK so geom positions are valid.
-        self._set_pose(model, data, NEUTRAL_POSE)
+        # Set joints to the profile's anchor pose and run FK so geom
+        # positions are valid.
+        self._set_pose(model, data, self.profile.neutral_pose)
 
         # Foot tip detection: two paths depending on whether the model uses a
         # mesh tibia (legacy phantomx.xml) or primitive geoms (phantomx_simple.xml).
         #   * Mesh path: find lowest-world-Z vertex of the tibia mesh at
-        #     NEUTRAL_POSE — empirical, picks up whatever the mesh says.
+        #     profile.neutral_pose — empirical, picks up whatever the mesh says.
         #   * Primitive path: look up the named foot_<LEG> geom and read its
         #     `geom_pos` (tibia-local position). Direct, exact, no search.
         # The primitive path is preferred — it's cheaper and produces an
@@ -364,7 +372,7 @@ class Controller:
         self.LEG_ORIGIN_BODY[:, 2] = self.LEG_ORIGIN_BODY[:, 2].mean()
 
         # Per-leg horizontal coxa→foot unit vector (body frame).
-        diff_xy = self.LEG_ORIGIN_BODY[:, :2] - COXA_POS_BODY[:, :2]
+        diff_xy = self.LEG_ORIGIN_BODY[:, :2] - self._coxa_pos_body[:, :2]
         norms   = np.linalg.norm(diff_xy, axis=1, keepdims=True)
         self.LEG_RADIAL_DIR_XY = diff_xy / norms
 
@@ -397,19 +405,19 @@ class Controller:
         self.spin_ref_radius = float(arc_radii[0])     # outer-leg radius (RR)
         self._arc_radii      = arc_radii               # informational
 
-        # Formula→MJCF joint-angle offsets, anchored at NEUTRAL_POSE
+        # Formula→MJCF joint-angle offsets, anchored at profile.neutral_pose
         # (which matches the un-widened calibrated rest).
         self.LEG_OFFSETS = np.zeros((6, 3))
         for i in range(6):
-            raw = np.array(_ik_raw(*rest_coxa_cal[i]))
-            expected = NEUTRAL_POSE[i*3:i*3+3]
-            s_c, s_f, s_t = _joint_signs(i)
+            raw = np.array(_ik_raw(*rest_coxa_cal[i], self.L1, self.L2, self.L3))
+            expected = self.profile.neutral_pose[i*3:i*3+3]
+            s_c, s_f, s_t = self._joint_signs_array[i]
             self.LEG_OFFSETS[i, 0] = expected[0] - s_c * raw[0]
             self.LEG_OFFSETS[i, 1] = expected[1] - s_f * raw[1]
             self.LEG_OFFSETS[i, 2] = expected[2] - s_t * raw[2]
 
         # Gait-time neutral pose: joints that put each foot at the WIDENED
-        # FOOT_REST_COXA. Equals NEUTRAL_POSE when default_stance_width == 0.
+        # FOOT_REST_COXA. Equals profile.neutral_pose when default_stance_width == 0.
         self.gait_neutral_pose = np.zeros(18)
         for i in range(6):
             self.gait_neutral_pose[i*3:i*3+3] = self._ik_mjcf(self.FOOT_REST_COXA[i], i)
@@ -583,7 +591,7 @@ class Controller:
         c_h, s_h = math.cos(heading), math.sin(heading)
 
         # Per-leg phase indices (vectorized).
-        s_i = (s_global + LEG_PHASE) % 1.0                            # (6,)
+        s_i = (s_global + self._leg_phase) % 1.0                      # (6,)
         n_idx = (s_i * self.path_res).astype(np.int64) % self.path_res # (6,)
 
         # Lift + canonical path samples for all 6 legs at once.
@@ -677,14 +685,15 @@ class Controller:
     # ----------------------------------------------------------------------
     def _joints_from_feet_coxa(self, feet_coxa):
         """Vectorized: (6, 3) coxa-local foot targets → (18,) joint angles."""
-        raw = _ik_raw_batch(feet_coxa)                              # (6, 3)
+        raw = _ik_raw_batch(feet_coxa, self.L1, self.L2, self.L3)   # (6, 3)
         mjcf = self._joint_signs_array * raw + self.LEG_OFFSETS    # (6, 3)
         return mjcf.flatten()
 
     def _ik_mjcf(self, foot_coxa, leg_idx):
         """Single-leg IK → MJCF joint angles. Used at calibration time."""
-        coxa_raw, femur_raw, tibia_raw = _ik_raw(foot_coxa[0], foot_coxa[1], foot_coxa[2])
-        s_c, s_f, s_t = _joint_signs(leg_idx)
+        coxa_raw, femur_raw, tibia_raw = _ik_raw(
+            foot_coxa[0], foot_coxa[1], foot_coxa[2], self.L1, self.L2, self.L3)
+        s_c, s_f, s_t = self._joint_signs_array[leg_idx]
         return (
             s_c * coxa_raw  + self.LEG_OFFSETS[leg_idx, 0],
             s_f * femur_raw + self.LEG_OFFSETS[leg_idx, 1],
@@ -697,7 +706,7 @@ class Controller:
     def _body_to_coxa_local(self, p_body, leg_idx):
         """Single-leg body-frame point → coxa-local. (Legacy path, used by
         calibration code; runtime uses the batch version below.)"""
-        rel = p_body - COXA_POS_BODY[leg_idx]
+        rel = p_body - self._coxa_pos_body[leg_idx]
         c, s = self._yaw_cs[leg_idx]
         return np.array([
              c * rel[0] + s * rel[1],
@@ -708,7 +717,7 @@ class Controller:
     def _coxa_local_to_body(self, p_coxa, leg_idx):
         """Single-leg inverse of _body_to_coxa_local."""
         c, s = self._yaw_cs[leg_idx]
-        return COXA_POS_BODY[leg_idx] + np.array([
+        return self._coxa_pos_body[leg_idx] + np.array([
              c * p_coxa[0] - s * p_coxa[1],
              s * p_coxa[0] + c * p_coxa[1],
              p_coxa[2],
@@ -718,7 +727,7 @@ class Controller:
         """Vectorized body-frame → coxa-local for all 6 legs.
         Input: (6, 3) body-frame points (one per leg).
         Output: (6, 3) coxa-local points."""
-        rel = p_body - COXA_POS_BODY                          # (6, 3)
+        rel = p_body - self._coxa_pos_body                    # (6, 3)
         out = np.empty_like(rel)
         out[:, 0] =  self._yaw_c * rel[:, 0] + self._yaw_s * rel[:, 1]
         out[:, 1] = -self._yaw_s * rel[:, 0] + self._yaw_c * rel[:, 1]
@@ -732,7 +741,7 @@ class Controller:
         out[:, 0] = self._yaw_c * p_coxa[:, 0] - self._yaw_s * p_coxa[:, 1]
         out[:, 1] = self._yaw_s * p_coxa[:, 0] + self._yaw_c * p_coxa[:, 1]
         out[:, 2] = p_coxa[:, 2]
-        return out + COXA_POS_BODY
+        return out + self._coxa_pos_body
 
     # ----------------------------------------------------------------------
     # Internal: tilt overlay

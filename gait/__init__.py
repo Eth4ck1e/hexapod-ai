@@ -15,6 +15,11 @@ Public API:
   LEG_PHASE      — tripod phase offsets per leg.
   NEUTRAL_POSE   — joint pose for the calibrated (un-widened) foot rest.
   COXA_LENGTH, FEMUR_LENGTH, TIBIA_LENGTH — link lengths.
+  (The bare constants above are the PhantomX profile's values, kept for
+   backward compatibility. Prefer ctrl.profile.<field>.)
+  RobotProfile   — per-robot geometry + gait defaults (gait/robot_profile.py).
+  get_profile    — look up a registered profile by name ("phantomx", ...).
+  PHANTOMX / PROFILES / register_profile — the registry.
 
 See docs/kinematics.md for the IK derivation.
 """
@@ -30,6 +35,15 @@ from .controller import (
     TIBIA_LENGTH,
     Controller,
 )
+from .robot_profile import (
+    DEFAULT_PROFILE,
+    PHANTOMX,
+    PROFILES,
+    RobotProfile,
+    get_profile,
+    profile_for_model,
+    register_profile,
+)
 
 __all__ = [
     "Controller",
@@ -41,4 +55,11 @@ __all__ = [
     "COXA_LENGTH",
     "FEMUR_LENGTH",
     "TIBIA_LENGTH",
+    "RobotProfile",
+    "get_profile",
+    "profile_for_model",
+    "register_profile",
+    "PHANTOMX",
+    "PROFILES",
+    "DEFAULT_PROFILE",
 ]

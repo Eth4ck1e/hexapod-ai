@@ -20,18 +20,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from gait.controller import (
-    COXA_LENGTH,
-    FEMUR_LENGTH,
-    TIBIA_LENGTH,
-    Controller,
-)
-from gait.controller import (
-    COXA_POS_BODY as _COXA_POS_BODY_NP,
-)
-from gait.controller import (
-    LEG_PHASE as _LEG_PHASE_NP,
-)
+from gait.controller import Controller
 
 
 class GaitParams(NamedTuple):
@@ -53,21 +42,27 @@ class GaitParams(NamedTuple):
     max_yaw_rate:      jnp.ndarray   # () scalar
     gait_period:       jnp.ndarray   # () scalar
     path_radius:       jnp.ndarray   # () scalar  (R for canonical_path)
+    coxa_length:       jnp.ndarray   # () scalar  link lengths from RobotProfile
+    femur_length:      jnp.ndarray   # () scalar
+    tibia_length:      jnp.ndarray   # () scalar
     path_res:          int           # static — used as int for shape ops
 
 
 # ============================================================================
 # Build constants from numpy controller (slow path, runs once)
 # ============================================================================
-def build_params(model_path: str,
+def build_params(model_path: str = None,
                  gait_period: float = None,
                  path_radius: float = None,
                  path_res:    int   = None,
                  default_stance_width: float = None,
-                 dtype = jnp.float32) -> GaitParams:
-    """Calibrate via the numpy Controller, copy constants into jnp arrays."""
+                 dtype = jnp.float32,
+                 profile = None) -> GaitParams:
+    """Calibrate via the numpy Controller, copy constants into jnp arrays.
+    `profile` is a RobotProfile or registered name; None → PhantomX."""
     ctrl = Controller(
         model_path,
+        profile=profile,
         gait_period=gait_period,
         path_radius=path_radius,
         path_res=path_res,
@@ -76,8 +71,8 @@ def build_params(model_path: str,
     return GaitParams(
         yaw_c            = jnp.asarray(ctrl._yaw_c,            dtype=dtype),
         yaw_s            = jnp.asarray(ctrl._yaw_s,            dtype=dtype),
-        coxa_pos_body    = jnp.asarray(_COXA_POS_BODY_NP,      dtype=dtype),
-        leg_phase        = jnp.asarray(_LEG_PHASE_NP,          dtype=dtype),
+        coxa_pos_body    = jnp.asarray(ctrl.profile.coxa_pos_body, dtype=dtype),
+        leg_phase        = jnp.asarray(ctrl.profile.leg_phase,  dtype=dtype),
         foot_rest_coxa   = jnp.asarray(ctrl.FOOT_REST_COXA,    dtype=dtype),
         body_origin_coxa = jnp.asarray(ctrl.BODY_ORIGIN_COXA,  dtype=dtype),
         leg_path_deltas  = jnp.asarray(ctrl.LEG_PATH_DELTAS,   dtype=dtype),
@@ -88,6 +83,9 @@ def build_params(model_path: str,
         max_yaw_rate     = jnp.asarray(ctrl.MAX_YAW_RATE,      dtype=dtype),
         gait_period      = jnp.asarray(ctrl.gait_period,       dtype=dtype),
         path_radius      = jnp.asarray(ctrl.path_radius,       dtype=dtype),
+        coxa_length      = jnp.asarray(ctrl.L1,                dtype=dtype),
+        femur_length     = jnp.asarray(ctrl.L2,                dtype=dtype),
+        tibia_length     = jnp.asarray(ctrl.L3,                dtype=dtype),
         path_res         = int(ctrl.path_res),
     )
 
@@ -142,20 +140,24 @@ def _apply_tilt(rest_coxa, pitch, roll, params):
     return _body_to_coxa_local_batch(tilted_body, params)
 
 
-def _ik_raw_batch(feet_coxa):
-    """Vectorized closed-form IK over all 6 legs. (6, 3) coxa-local → (6, 3) raw."""
+def _ik_raw_batch(feet_coxa, params):
+    """Vectorized closed-form IK over all 6 legs. (6, 3) coxa-local → (6, 3) raw.
+    Link lengths come from params (RobotProfile)."""
+    L1 = params.coxa_length
+    L2 = params.femur_length
+    L3 = params.tibia_length
     fx = feet_coxa[:, 0]
     fy = feet_coxa[:, 1]
     fz = feet_coxa[:, 2]
     coxa = jnp.arctan2(fy, fx)
     r    = jnp.hypot(fx, fy)
-    x_fp = r - COXA_LENGTH
+    x_fp = r - L1
     z_fp = fz
     D    = jnp.hypot(x_fp, z_fp)
-    D    = jnp.minimum(D, FEMUR_LENGTH + TIBIA_LENGTH - 1e-6)
-    D    = jnp.maximum(D, abs(FEMUR_LENGTH - TIBIA_LENGTH) + 1e-6)
-    cos_a = (FEMUR_LENGTH**2 + D**2 - TIBIA_LENGTH**2) / (2.0 * FEMUR_LENGTH * D)
-    cos_g = (FEMUR_LENGTH**2 + TIBIA_LENGTH**2 - D**2) / (2.0 * FEMUR_LENGTH * TIBIA_LENGTH)
+    D    = jnp.minimum(D, L2 + L3 - 1e-6)
+    D    = jnp.maximum(D, jnp.abs(L2 - L3) + 1e-6)
+    cos_a = (L2**2 + D**2 - L3**2) / (2.0 * L2 * D)
+    cos_g = (L2**2 + L3**2 - D**2) / (2.0 * L2 * L3)
     cos_a = jnp.clip(cos_a, -1.0, 1.0)
     cos_g = jnp.clip(cos_g, -1.0, 1.0)
     alpha = jnp.arccos(cos_a)
@@ -239,7 +241,7 @@ def _compute_foot_targets_coxa(params, cmd, t):
 
 
 def _joints_from_feet_coxa(feet_coxa, params):
-    raw  = _ik_raw_batch(feet_coxa)
+    raw  = _ik_raw_batch(feet_coxa, params)
     mjcf = params.joint_signs * raw + params.leg_offsets
     return mjcf.reshape(-1)
 

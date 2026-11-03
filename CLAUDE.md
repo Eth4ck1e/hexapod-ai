@@ -68,6 +68,7 @@ change anything in one of these areas, edit ONLY the owning module.**
 | `envs/stance_envelope.py` | Stance height + dh-conditional width envelope | JAX env cmd sampler, watch_scaffold interactive presets, demo_phases watch tests |
 | `envs/cmd_bins.py` | 150-bin partition (motion × height × width) | JAX env disc routing, prior_data binning, multi-head disc, train_jax_amp |
 | `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `NUM_ENVS`, `DISC_BATCH` | train_jax_amp, pretrain_bc_jax, watch_demo_jax, watch_controller |
+| **`gait/robot_profile.py`** (2026-11-03) | Per-robot `RobotProfile`: leg mount geometry, link lengths, IK anchor pose, joint signs, gait defaults, speed ladder, owned MJCF filenames. `PHANTOMX` is the default. | `gait/controller.py`, `gait/controller_jax.py` (both robot-agnostic now); everything downstream via `Controller(model_path)` |
 
 If you find yourself manually syncing the same constant or formula
 between two files, **that's a signal to extract it to a SoT module**.
@@ -184,6 +185,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 ## Important non-obvious things
 
 - **Gait IK is closed-form and vectorized**. Sub-mm round-trip accuracy validated against MJCF FK. See `docs/kinematics.md`.
+- **Robot-profile refactor (2026-11-03) is bit-equivalent for PhantomX.** Verified: 2000 random cmds × 3 MJCFs × 2 speed levels, numpy old-vs-new error exactly 0.0; JAX old-vs-new 1e-15 rad. Snapshots in `snapshots/*_pre_robot_profile.py`.
+- **Known gap: JAX controller has no arc-turning mode.** `gait/controller.py` (eval/watch) switches to arc-aware foot paths when `MIN_TURN_RADIUS < speed/|wz| < MAX_TURN_RADIUS`; `gait/controller_jax.py` (training) always uses translate+spin superposition. ~27% of random combined translate+turn cmds hit the window, with up to 0.29 rad / 13 mm scaffold difference. `python gait/controller_jax.py` parity therefore reports MISMATCH — pre-existing, not a regression. Either port arc mode to JAX or disable it in numpy for eval; decide before mini-hexapod training.
 - **Per-joint sign conventions**: coxa always +1; femur +1 right / -1 left; tibia -1 right / +1 left. Don't "simplify" by negating all three for left legs — breaks the math.
 - **Foot tip is empirical**: tibia-local `(0.134, 0.031, 0.0)`. The simple models replicate this with a foot sphere geom at the same position.
 - **Foot z is normalized to uniform plane in body frame** (v21+). `gait/controller.py:calibrate()` sets `LEG_ORIGIN_BODY[:, 2] = mean(z)` so all 6 feet sit at exactly -145.99 mm in body frame. Fixes a 3mm asymmetry from MJCF coxa mount differences.
@@ -198,7 +201,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 - **Always use `python -u` when piping training stdout through `tee`**: block-buffered pipes can swallow hours of training output before flushing.
 - **The hovering exploit (pre-v23 era)**: with airborne/contact penalties disabled, the policy maximizes velocity-tracking by hovering. v22+ partial fix via cmd-conditional disc, v25 explicit fix via contact_mismatch_pen.
 - **Reward hacking is the dominant failure mode.** Every reward shaping the policy will exploit if there's a degenerate strategy that scores well. v14/v15 hit it (high reward, no walking). v24 hit it again (better metrics, worse walking). v25's EMA + contact penalty is the structural fix.
-- **Watcher auto-detects policy obs dim** from the normalizer mean shape. Pre-v24 policies (78-dim obs) work in the new 114-dim env via `obs[:78]` slicing. See `scripts/watch_demo_jax.py:main()`.
+- **Watcher auto-detects policy obs dim** from the normalizer mean shape and slices `obs[:policy_obs_dim]` if the env emits more dims than the policy expects. Lets older checkpoints run after an obs-schema change. See `scripts/watch_demo_jax.py:main()`.
 
 ## Files at a glance (post-2026-05-13)
 
@@ -231,7 +234,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `envs/hexapod_brax_env.py` | Brax `Env` adapter wrapping the JAX env. |
 | `envs/hexapod_amp_env.py` | `HexapodBraxEnv` + AMP style reward via frozen disc. |
 | `envs/hexapod_env.py` | Gym env. Used ONLY for watch / eval / record. Shares obs layout with JAX env. |
-| **`envs/obs_layout.py`** | **SoT**: 114-dim obs schema (joint_pos, joint_vel, imu_quat, imu_gyro, imu_accel, scaffold_hint, phase_sc, cmd, body_linvel, joint_torque, joint_pos_error). |
+| **`envs/obs_layout.py`** | **SoT**: 78-dim obs schema (joint_pos, joint_vel, imu_quat, imu_gyro, imu_accel, scaffold_hint, phase_sc, cmd, body_linvel). Motor-feedback slots (joint_torque, joint_pos_error) were added in v24 and removed in v26. |
 | **`envs/stance_envelope.py`** | **SoT**: dh range + dh-conditional dw envelope. |
 | **`envs/cmd_bins.py`** | **SoT**: 150-bin partition for the multi-head discriminator. |
 
@@ -239,8 +242,9 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 
 | Path | Purpose |
 |------|---------|
-| `gait/controller.py` | Numpy gait controller. Normalizes foot z to uniform plane (v21+). |
-| `gait/controller_jax.py` | Pure-JAX port. Calibrates via numpy `Controller` then copies constants. |
+| `gait/robot_profile.py` | **SoT**: `RobotProfile` dataclass + registry (`PHANTOMX`, `get_profile`, `profile_for_model`, `register_profile`). All chassis-specific numbers live here. |
+| `gait/controller.py` | Numpy gait controller, robot-agnostic. `Controller()` → PhantomX; `Controller(model_path)` infers the profile from the MJCF filename via each profile's `model_patterns`; `Controller(profile=...)` is explicit. Bare module constants (`COXA_LENGTH`, `NEUTRAL_POSE`, ...) still exist as PhantomX aliases for old tools. Normalizes foot z to uniform plane (v21+). |
+| `gait/controller_jax.py` | Pure-JAX port. `build_params(model_path, profile=...)` calibrates via numpy `Controller` then copies constants (link lengths now live in `GaitParams`). |
 
 ### Models → `models/`
 
@@ -341,7 +345,7 @@ The paper "Learning Natural and Robust Hexapod Locomotion" (Chen et al, SJTU) tr
 
 **Our diverge from the paper**:
 1. **Partition discriminator** instead of single conditional. The paper's conditional disc still permits cross-cmd blur; our 150-bin partition forces strict same-bin comparison and fixed v22d's "scores well but doesn't walk" failure mode.
-2. **Motor feedback obs** (joint_torque + joint_pos_error). The paper doesn't expose these to the policy; we found they're necessary for the policy to know when feet are loaded — without them, contact-aware rewards are useless and recovery / terrain training is fundamentally limited.
+2. ~~**Motor feedback obs** (joint_torque + joint_pos_error)~~ — tried in v24, reverted in v26. The paper doesn't expose these to the actor, and v24's extra obs made velocity tracking more gameable (better metrics, worse walking). If terrain / recovery training later needs contact awareness, revisit via the paper's memory encoder (#86) rather than raw torque obs.
 
 ## Lessons learned (universal RL principles)
 
@@ -355,9 +359,9 @@ The paper "Learning Natural and Robust Hexapod Locomotion" (Chen et al, SJTU) tr
 
 ## MJX / hardware findings (historical reference)
 
-- **CUDA MJX (5060 Ti via WSL2)**: ~377k SPS on Brax Ant. Real-world end-to-end with our hexapod env + 114-dim obs + partition disc: ~200k it/s.
+- **CUDA MJX (5060 Ti via WSL2)**: ~377k SPS on Brax Ant. End-to-end with our hexapod env + partition disc: ~200k it/s at 114-dim obs (v24-v25), ~220-240k it/s at 78-dim obs (v26+).
 - **Mac (JAX-Metal)**: blocked; Cholesky op missing. CPU MJX on M3 Max is 1.8× SPS — not worth it.
-- **Memory pressure on 5060 Ti**: 16 GB VRAM is tight with 114-dim obs + 150-head disc. Constants `NUM_ENVS=2048`, `DISC_BATCH=512`, `N_ENVS_DEMO=2048`. Going larger triggers RESOURCE_EXHAUSTED in the disc gradient penalty.
+- **Memory pressure on 5060 Ti**: 16 GB VRAM was tight at 114-dim obs + 6.1M-transition priors (`NUM_ENVS=2048`, `DISC_BATCH=512`). After the v26 obs revert and v27 smaller priors (~430 MB vs 2.6 GB), current knobs in `scripts/chain_train.py` are `NUM_ENVS=4096`, `DISC_BATCH=1024`. RESOURCE_EXHAUSTED in the disc gradient penalty is the symptom when these go too high.
 
 ## Patterns developed in workstation sessions
 
@@ -366,6 +370,35 @@ The paper "Learning Natural and Robust Hexapod Locomotion" (Chen et al, SJTU) tr
 - **Always launch long training via WSL with `python -u` and `tee`** to a stdout log; check on it with `ScheduleWakeup`.
 - **`HexapodAMPEnv` constructor must be called from inside the segment loop** each iteration with the updated discriminator params — that's how the disc-updates propagate to the next PPO segment.
 - **Numerical-equivalence + round-trip validation** on every IK refactor: random cmd → predict → mj_forward → measured foot. Sub-mm error means correctness preserved.
+
+## Mini hexapod (side bot → second training target, started 2026-11-03)
+
+The smaller "catalyst" hexapod. Brought up on 2026-05-17 with analytical
+gait firmware only — **no policy has ever run on hardware**. Goal now: get
+it to v27-equivalent (BC → AMP) and deploy a real policy on it.
+
+- **Hardware**: Seeed XIAO ESP32-C3 + 2× PCA9685 (right 0x40 / left 0x41),
+  18× Miuzei MS18 9g micro servos (500–2500 µs @ 50 Hz, no position
+  feedback), MPU6050 IMU (to be added; needs Madgwick/complementary filter
+  in firmware). 8BitDo Pro 3 via Bluepad32 planned.
+- **Geometry (from firmware)**: femur 55 mm, tibia 89.5 mm; corner coxas
+  at (±56.75, ±32.0) mm at ±45°, middle coxas at (0, ±42.4) mm at ±90°.
+  **Unknown until measured**: coxa-axis→femur-axis offset (firmware IK
+  assumes 0), body + leg masses, foot geometry. User has no access to the
+  bot until ~mid-Nov 2026.
+- **Firmware**: `mini_hexapod/firmware/arduino/` — stages 01–05 +
+  `hexapod_firmware.ino` (menu: geometry/trim/sign/IK/walk/BT stub/export,
+  persists to NVS).
+- **Sim/obs plan**: policy obs for this bot drops `body_linvel`, feeds
+  COMMANDED joint angle as `joint_pos` (servos are open-loop) with
+  finite-difference `joint_vel`, keeps IMU quat+gyro. Train with IMU noise
+  + latency. Int8 MLP (256,128,64) ≈ 60 KB fits the C3.
+- **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) mini MJCF draft
+  + `MINI_HEXAPOD` profile (placeholders flagged); (3) hardware-realistic
+  obs variant; (4) firmware IMU + inference skeleton; (5) when measured:
+  finalize MJCF, re-derive limits/envelope/speed, priors, BC, AMP.
+- **Workstation note**: WSL was reinstalled 2026-07-21; `~/.venv-mjx` was
+  rebuilt 2026-11-03 (jax[cuda12] 0.10, mujoco/mjx 3.7.0, brax 0.14.2).
 
 ## Memory / sync
 
