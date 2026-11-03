@@ -37,6 +37,7 @@ from .controller import (
 )
 from .robot_profile import (
     DEFAULT_PROFILE,
+    MINI_HEXAPOD,
     PHANTOMX,
     PROFILES,
     RobotProfile,
@@ -60,6 +61,7 @@ __all__ = [
     "profile_for_model",
     "register_profile",
     "PHANTOMX",
+    "MINI_HEXAPOD",
     "PROFILES",
     "DEFAULT_PROFILE",
 ]

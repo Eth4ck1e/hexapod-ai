@@ -162,3 +162,53 @@ def test_controller_default_and_explicit_profile_agree():
 
     lengths = (a.profile.coxa_length, a.profile.femur_length, a.profile.tibia_length)
     assert lengths == (COXA_LENGTH, FEMUR_LENGTH, TIBIA_LENGTH)
+
+
+# ---------------------------------------------------------------------------
+# Mini hexapod (second robot) — generated MJCFs + profile
+# ---------------------------------------------------------------------------
+MINI_MODELS = ("mini_hexapod_mjx.xml", "mini_hexapod_simple.xml")
+
+
+@pytest.mark.parametrize("fname", MINI_MODELS)
+def test_mini_hexapod_model_loads(mujoco_available, fname):
+    model = mujoco_available.MjModel.from_xml_path(str(_PROJECT_ROOT / "models" / fname))
+    assert model.nu == 18
+    assert model.nq == 25
+
+
+@pytest.mark.parametrize("fname", MINI_MODELS)
+def test_mini_hexapod_profile_and_ik_roundtrip(mujoco_available, fname):
+    """Controller infers the mini profile from the filename and its IK
+    round-trips through MJCF FK to sub-millimetre accuracy."""
+    model_path = str(_PROJECT_ROOT / "models" / fname)
+    ctrl = Controller(model_path)
+    assert ctrl.profile.name == "mini_hexapod"
+    # All feet rest on one plane, tibia_length below the body.
+    np.testing.assert_allclose(ctrl.LEG_ORIGIN_BODY[:, 2], -ctrl.profile.tibia_length, atol=1e-9)
+    model = mujoco_available.MjModel.from_xml_path(model_path)
+    data = mujoco_available.MjData(model)
+    tib = [mujoco_available.mj_name2id(model, mujoco_available.mjtObj.mjOBJ_BODY, f"tibia_{n}")
+           for n in ("RR", "RM", "RF", "LR", "LM", "LF")]
+    rng = np.random.default_rng(0)
+    worst = 0.0
+    for _ in range(50):
+        feet = ctrl.LEG_ORIGIN_BODY + rng.uniform([-0.02, -0.02, -0.015], [0.02, 0.02, 0.03], size=(6, 3))
+        data.qpos[:] = 0.0
+        data.qpos[3] = 1.0
+        data.qpos[7:25] = ctrl.body_to_joints(feet)
+        mujoco_available.mj_forward(model, data)
+        for i in range(6):
+            fk = data.xpos[tib[i]] + data.xmat[tib[i]].reshape(3, 3) @ ctrl.FOOT_TIP_LOCAL[i]
+            worst = max(worst, float(np.linalg.norm(fk - feet[i])))
+    assert worst < 1e-4, f"IK round-trip error {worst * 1e3:.3f} mm"
+
+
+def test_mini_hexapod_generator_is_in_sync():
+    """Regenerating the MJCFs must reproduce the committed files exactly."""
+    sys.path.insert(0, str(_PROJECT_ROOT / "tools"))
+    import gen_mini_hexapod_mjcf as gen
+
+    for mjx, fname in ((True, MINI_MODELS[0]), (False, MINI_MODELS[1])):
+        on_disk = (_PROJECT_ROOT / "models" / fname).read_text(encoding="utf-8")
+        assert gen.build(mjx) == on_disk, f"{fname} is stale — run tools/gen_mini_hexapod_mjcf.py"

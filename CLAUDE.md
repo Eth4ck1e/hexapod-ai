@@ -253,11 +253,13 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `models/phantomx_simple_mjx.xml` | MJX training MJCF. Primitive geoms, Euler, feet↔floor only. |
 | `models/phantomx_simple.xml` | Primitive-geom MJCF with full self-collision (RoM derivation). |
 | `models/phantomx.xml` | Mesh-based MJCF (visualization, NOT training). |
+| `models/mini_hexapod_mjx.xml` / `mini_hexapod_simple.xml` | **GENERATED** by `tools/gen_mini_hexapod_mjcf.py` — do not hand-edit (a test fails if they drift). Training variant (feet↔floor only) and full-collision variant. Clean joint axes: coxa +z, femur −y, tibia +y → all IK signs +1; joints=0 is legs-straight-out, L-pose = (0, 0, π/2). |
 
 ### Tools → `tools/`
 
 | Path | Purpose |
 |------|---------|
+| `tools/gen_mini_hexapod_mjcf.py` | One dimension/mass/servo table → both mini-hexapod MJCFs. Edit DIMS / MASS / SERVO here, rerun, commit the XMLs. Every PLACEHOLDER is marked. |
 | `tools/watch_scaffold.py` | Render scaffold gait directly via `Controller.predict()`. `--interactive` mode for stance tuning (keys 1-6). Uses `envs/stance_envelope.py` for height presets. |
 | `tools/analyze_cmd_distances.py` | Diagnostic: K-NN structure of priors in cmd space. Was used to design the 150-bin partition. |
 | `tools/to_parallel_sweep.py` | TO sweep harness — parallel solve of many cost-weight / gait-param variations. |
@@ -393,10 +395,17 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   COMMANDED joint angle as `joint_pos` (servos are open-loop) with
   finite-difference `joint_vel`, keeps IMU quat+gyro. Train with IMU noise
   + latency. Int8 MLP (256,128,64) ≈ 60 KB fits the C3.
-- **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) mini MJCF draft
-  + `MINI_HEXAPOD` profile (placeholders flagged); (3) hardware-realistic
-  obs variant; (4) firmware IMU + inference skeleton; (5) when measured:
-  finalize MJCF, re-derive limits/envelope/speed, priors, BC, AMP.
+- **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) ✅ mini MJCF
+  draft + `MINI_HEXAPOD` profile (placeholders flagged; IK round-trip exact,
+  stands + walks under physics at ≤44% of stall torque); (3) make the JAX
+  env read robot params from the profile (spawn_z, ref_body_z, min_z, motor
+  limits, foot radius — currently hardcoded PhantomX values in
+  `EnvParams`) + hardware-realistic obs variant; (4) firmware IMU +
+  inference skeleton; (5) when measured: finalize MJCF, re-derive
+  limits/envelope/speed, priors, BC, AMP.
+- **Also PhantomX-specific and not yet profile-driven**: `envs/stance_envelope.py`
+  (dh/dw envelope measured on PhantomX), `envs/cmd_bins.py` bin edges,
+  `FULL_*_DEV` error scales in `make_env_params`. Each needs a mini variant.
 - **Workstation note**: WSL was reinstalled 2026-07-21; `~/.venv-mjx` was
   rebuilt 2026-11-03 (jax[cuda12] 0.10, mujoco/mjx 3.7.0, brax 0.14.2).
 
