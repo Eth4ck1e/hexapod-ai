@@ -214,6 +214,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `scripts/train_jax_amp.py` | Brax PPO + AMP training. `--partition-disc`, `--knn-k`, `--style-weight`, `--recovery-curriculum` (shelved). |
 | `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
 | `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). Robot via `HEXAPOD_ROBOT`. |
+| `scripts/drive_serial.py` | **Tethered deployment**: host-side scaffold + policy → `J a0..a17` frames over serial to the mini firmware's `P` mode. `--dry-run`, `--source demo|hold|gamepad`, `--log-csv`. |
 | `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
 | `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
 | `scripts/watch_controller.py` | 8BitDo / Xbox controller-driven inference. Falls back to watch_demo_jax `--interactive` if no controller. |
@@ -417,6 +418,21 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   Compiles with the Arduino IDE's bundled CLI on the Mac:
   `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3 mini_hexapod/firmware/arduino/hexapod_firmware`
   (needs the Adafruit PWM Servo Driver library).
+- **Deployment path (decided 2026-11-12): tethered first.** The policy obs
+  include the Python scaffold's foot intent and the action is a foot residual
+  on top of it, so on-device inference would require porting
+  `gait/controller.py` to the C3 as well. Instead `scripts/drive_serial.py`
+  runs scaffold + policy on the host at the training rate (200 Hz) and
+  streams joint targets at 50 Hz over USB serial to firmware menu `P`
+  (`J a0..a17` radians, sim convention + sim leg order; firmware maps to its
+  own leg order and applies trims/signs; 500 ms watchdog homes the legs).
+  Sources: `--source demo|hold|gamepad`; `--params` omitted = pure scaffold
+  (test this first on the bot); `--dry-run` needs no serial. On-device int8
+  inference stays a stretch goal.
+- **Mini speed ladder** (`speed_levels` 0.5…3.0 in the profile) from
+  `tools/calibrate_scaffold_speed.py` on the placeholder MJCF
+  (`tools/scaffold_speed_calibration_mini.csv`); default gait unchanged
+  (0.80 s / 15 mm → 0.075 m/s). Servos saturate above ~0.12 m/s.
 - **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) ✅ mini MJCF
   draft + `MINI_HEXAPOD` profile (placeholders flagged; IK round-trip exact,
   stands + walks under physics at ≤44% of stall torque); (3) ✅ JAX + gym

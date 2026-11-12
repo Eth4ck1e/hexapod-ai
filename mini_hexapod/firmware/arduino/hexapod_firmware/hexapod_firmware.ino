@@ -11,6 +11,8 @@
 //   5. W  walking   — verify gait via serial commands
 //   6. B  BT pairing — pair 8BitDo Pro 3 (stub for now)
 //   7. L  limits    — per-joint travel-range calibration (jog to each stop)
+//   8. P  policy stream — host PC streams 18 joint targets at ~50 Hz over
+//                     serial (scripts/drive_serial.py runs scaffold + policy)
 //   X  export    — dump full config as C++
 //   J  export    — dump full config as JSON (feeds the simulator profile)
 //   R  reset NVS — factory defaults (confirm)
@@ -109,7 +111,7 @@ const float   TRIPOD_OFFS[6] = {0, 0, 0, 0.5f, 0.5f, 0.5f};
 // =========================== STATE MACHINE ===========================
 enum Mode {
   MODE_MAIN, MODE_GEOMETRY, MODE_TRIM, MODE_SIGN,
-  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON
+  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON, MODE_STREAM
 };
 Mode current_mode = MODE_MAIN;
 
@@ -400,6 +402,7 @@ void printMainMenu() {
   Serial.println("  W  walking controller");
   Serial.println("  B  bluetooth controller pairing (stub)");
   Serial.println("  L  joint travel-limit calibration (jog to each stop)");
+  Serial.println("  P  policy stream (host PC sends joint targets over serial)");
   Serial.println("  X  export full config as C++");
   Serial.println("  J  export full config as JSON (for the simulator)");
   Serial.println("  R  reset all NVS to defaults (confirm)");
@@ -419,6 +422,7 @@ void handleMainMenu() {
       case 'W': case 'w': current_mode = MODE_WALK;     return;
       case 'B': case 'b': current_mode = MODE_BT;       return;
       case 'L': case 'l': current_mode = MODE_RANGE;    return;
+      case 'P': case 'p': current_mode = MODE_STREAM;   return;
       case 'X': case 'x': current_mode = MODE_EXPORT;   return;
       case 'J': case 'j': current_mode = MODE_JSON;     return;
       case 'R': case 'r': {
@@ -1135,6 +1139,77 @@ void runRangeMode() {
 }
 
 // ====================================================================
+// =                      POLICY STREAM MODE                           =
+// ====================================================================
+// Tethered deployment: the host runs gait scaffold + trained policy
+// (scripts/drive_serial.py) and streams joint targets; this side only
+// converts kinematic angles to pulses. Line protocol (115200 8N1, '\n'):
+//   J a0 a1 ... a17   18 joint angles in RADIANS, simulator convention and
+//                     simulator leg order RR RM RF LR LM LF, each leg
+//                     (coxa, femur, tibia). Applied immediately; replies "ok".
+//   H                 home all legs (trim pose)
+//   Q                 leave stream mode
+// Safety: if no frame arrives for STREAM_TIMEOUT_MS the legs are homed and
+// a line "timeout" is printed; streaming resumes on the next frame.
+constexpr unsigned long STREAM_TIMEOUT_MS = 500;
+// simulator leg index -> firmware LEGS[] index
+const uint8_t SIM_TO_FW_LEG[6] = {2, 1, 0, 5, 4, 3};   // RR RM RF LR LM LF
+
+void runStreamMode() {
+  Serial.println();
+  Serial.println("=== POLICY STREAM ===");
+  Serial.println("Waiting for 'J a0 .. a17' frames (rad, sim order). 'H' home, 'Q' quit.");
+  homeAll();
+  unsigned long last_frame = millis();
+  bool timed_out = false;
+  String line;
+  line.reserve(200);
+
+  while (current_mode == MODE_STREAM) {
+    while (Serial.available()) {
+      char c = Serial.read();
+      if (c == '\r') continue;
+      if (c != '\n') { if (line.length() < 199) line += c; continue; }
+
+      // full line
+      if (line.length() == 0) { continue; }
+      char head = line.charAt(0);
+      if (head == 'Q' || head == 'q' || head == 'm') { homeAll(); current_mode = MODE_MAIN; line = ""; return; }
+      if (head == 'H' || head == 'h') { homeAll(); Serial.println("ok home"); line = ""; continue; }
+      if (head == 'J' || head == 'j') {
+        float a[18];
+        uint8_t n = 0;
+        const char* p = line.c_str() + 1;
+        char* end;
+        while (n < 18) {
+          float v = strtof(p, &end);
+          if (end == p) break;
+          a[n++] = v;
+          p = end;
+        }
+        if (n != 18) { Serial.print("err n="); Serial.println(n); line = ""; continue; }
+        for (uint8_t sl = 0; sl < 6; ++sl) {
+          uint8_t fl = SIM_TO_FW_LEG[sl];
+          cmdJointAngle(fl, 0, a[sl * 3 + 0]);
+          cmdJointAngle(fl, 1, a[sl * 3 + 1]);
+          cmdJointAngle(fl, 2, a[sl * 3 + 2]);
+        }
+        last_frame = millis();
+        timed_out = false;
+        Serial.println("ok");
+      }
+      line = "";
+    }
+    if (!timed_out && millis() - last_frame > STREAM_TIMEOUT_MS) {
+      homeAll();
+      timed_out = true;
+      Serial.println("timeout");
+    }
+    delay(1);
+  }
+}
+
+// ====================================================================
 // =                        JSON EXPORT MODE                           =
 // ====================================================================
 // One JSON object between BEGIN_JSON / END_JSON. Copy it into
@@ -1323,5 +1398,6 @@ void loop() {
     case MODE_EXPORT:   runExportMode(); break;
     case MODE_RANGE:    runRangeMode(); break;
     case MODE_JSON:     runJsonMode(); break;
+    case MODE_STREAM:   runStreamMode(); break;
   }
 }

@@ -278,7 +278,18 @@ MINI_HEXAPOD = RobotProfile(
     # Turn-radius window scaled by body size (~0.45× PhantomX).
     min_turn_radius=0.16,
     max_turn_radius=0.34,
-    speed_levels={},                        # none calibrated yet
+    # Speed ladder from tools/calibrate_scaffold_speed.py on the placeholder
+    # MJCF (2026-11-12, tools/scaffold_speed_calibration_mini.csv): rows with
+    # <20 mm slip and peak torque below ~60% of the 0.18 N·m stall placeholder.
+    # Above ~0.12 m/s the servos saturate. Re-run after measurement.
+    speed_levels={
+        0.5: {"gait_period": 1.60, "path_radius": 0.012},   # ~0.029 m/s
+        1.0: {"gait_period": 1.20, "path_radius": 0.015},   # ~0.048 m/s
+        1.5: {"gait_period": 1.00, "path_radius": 0.018},   # ~0.068 m/s
+        2.0: {"gait_period": 0.80, "path_radius": 0.018},   # ~0.084 m/s
+        2.5: {"gait_period": 0.65, "path_radius": 0.018},   # ~0.100 m/s
+        3.0: {"gait_period": 0.65, "path_radius": 0.022},   # ~0.122 m/s (0.18 N·m peak)
+    },
     spawn_z=_MINI_L3 + _MINI_FOOT_R + 0.015,
     ref_body_z=_MINI_L3 + _MINI_FOOT_R,
     min_body_z=0.03,
