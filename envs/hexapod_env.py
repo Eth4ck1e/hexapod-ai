@@ -561,11 +561,21 @@ class HexapodEnv(gym.Env):
             cmd[0] = magnitude * math.cos(heading)
             cmd[1] = magnitude * math.sin(heading)
 
-        # Remaining slots — independent uniform sampling.
+        # Remaining slots — independent uniform sampling. Stance height (5) and
+        # width (6) come from the robot profile's envelope (same numbers the
+        # JAX env trains on) rather than the PhantomX table below; dw is
+        # sampled conditional on the dh drawn just before it.
+        from envs.stance_envelope import envelope_for
+        stance = envelope_for(self._ctrl.profile)
         for slot in range(2, self.CMD_DIM):
             if mask[slot] == 0:
                 continue
-            lo, hi = self.SAMPLE_RANGES[slot]
+            if slot == 5:
+                lo, hi = stance.dh_min, stance.dh_max
+            elif slot == 6:
+                lo, hi = stance.safe_dw_range(float(cmd[5]))
+            else:
+                lo, hi = self.SAMPLE_RANGES[slot]
             v = self.np_random.uniform(lo, hi)
             if slot == 2:
                 v *= self._ctrl.MAX_YAW_RATE
