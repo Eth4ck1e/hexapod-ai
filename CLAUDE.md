@@ -52,6 +52,8 @@ finishes in ~2-2.5 hr. Optimal config: `num_envs=4096`, `batch=512`,
 - v26: **paper-pure realignment**. Stripped all hand-added penalties (drift, contact_mismatch, EMA filter); restored z_vel_w/body_angvel_xy_w to paper Table I values; added missing joint_accel_w; switched to per-axis exp tracking; obs back to 78-dim. Initial bug: `exp(-||err||²/σ²)` instead of `exp(-||err||²/σ)` made tracking 30× too tight at typical errors — bot didn't walk.
 - v27: **σ fix** (`/σ` not `/σ²`, matching legged_gym convention) + **smaller priors** (`amp_priors_v26_small.npz`, ~1M transitions vs 6.1M, saves ~2.2 GB GPU). NOW WALKING — best + final iters both clean.
 
+**Mini hexapod (2026-11-12)**: first full run `amp_to_mini_hexapod_v1` (placeholder geometry, no IMU, 75-dim hardware obs) trains cleanly and matches the scaffold; see the Mini hexapod section. Train it with `HEXAPOD_ROBOT=mini_hexapod`.
+
 **Current best walking policy**: latest `amp_to_v27*/iter*/final/params.pkl` (use `python scripts\launch.py watcher` to auto-detect best iter). v23 iter12 still works for the legacy 78-dim obs (which v27 is back to).
 
 **Hardware reality check.** Bot is a Trossen PhantomX MK-III using **Dynamixel AX-12A** servos (TTL half-duplex multidrop UART, daisychained). Motor specs: 6.18 rad/s no-load, **1.5 N·m stall**, 9-12 V. Computed practical max walking speed: ~0.40 m/s. MJCF `forcerange` ±1.5 N·m matches real motor envelope. Full analysis in `docs/MAX_SPEED_ANALYSIS.md`.
@@ -438,13 +440,18 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   draft + `MINI_HEXAPOD` profile (placeholders flagged; IK round-trip exact,
   stands + walks under physics at ≤44% of stall torque); (3) ✅ JAX + gym
   env read everything from the profile; stance envelope + cmd bins per
-  robot; hardware obs variant; `HEXAPOD_ROBOT` session switch; (3b) ⏳
-  **first mini pipeline run** `amp_to_mini_hexapod_v1` (priors → BC → AMP,
-  launched 2026-11-12 via `scripts/run_pipeline.sh` on placeholder
-  geometry — validates the pipeline + yields a demo video; expect to rerun
-  after measurement); (4) firmware range-calibration mode + int8 inference
-  skeleton (IMU optional); (5) when measured: finalize MJCF, re-derive
-  limits/envelope/speed, rerun the pipeline, deploy.
+  robot; hardware obs variant; `HEXAPOD_ROBOT` session switch; (3b) ✅
+  **first mini pipeline run** `amp_to_mini_hexapod_v1` (2026-11-12,
+  `scripts/run_pipeline.sh`, placeholder geometry): priors 1.0M transitions
+  (150/150 bins), BC, then 10 × 50M AMP-PPO in 68 min at ~200k it/s. JAX
+  [EVAL] +2222 → +2302 (iter3) → +2298 (iter10); gym eval iter10 tracking
+  0.95 (stage 1) / 0.89 (stage 2) vs pure scaffold 0.96 / 0.93, 0 falls —
+  i.e. AMP reproduces the scaffold on flat ground, as with PhantomX. Showcase video
+  `media/recordings/mini_v1_iter10_showcase.mp4`. **Expect to rerun after
+  measurement** (3 h incl. priors/BC); (4) ✅ firmware v0.2 (range
+  calibration, JSON export, serial policy stream) + `scripts/drive_serial.py`;
+  (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
+  re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
