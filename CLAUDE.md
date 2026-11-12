@@ -406,11 +406,17 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   disturbances — say so honestly when presenting. Flip `imu_available=True`
   (and retrain) once an MPU6050 + filter exists. Int8 MLP (256,128,64)
   ≈ 60 KB fits the C3.
-- **Firmware NVS reality check**: `hexapod_firmware.ino` persists geometry,
-  per-joint trim µs, per-joint sign and gait params — **not per-joint travel
-  limits**. A range-calibration mode (jog to each stop, store min/max µs,
-  JSON export) must be added before the bot visit so joint limits can be
-  measured in one session.
+- **Firmware v0.2 (2026-11-12)**: `hexapod_firmware.ino` persists geometry,
+  per-joint trim µs, sign, gait params and now **travel limits**
+  (`hexa_range` NVS namespace). Menu `L` = jog each joint to its stops and
+  save; `J` = JSON export (BEGIN_JSON…END_JSON). Save that block under
+  `mini_hexapod/calibration/<date>.json` and run
+  `tools/import_mini_calibration.py` → MJCF joint ranges (intersection over
+  legs, 3° margin) + geometry cross-check vs the profile. Firmware kinematic
+  angles equal MJCF joint angles at the L-pose, so no extra conversion.
+  Compiles with the Arduino IDE's bundled CLI on the Mac:
+  `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3 mini_hexapod/firmware/arduino/hexapod_firmware`
+  (needs the Adafruit PWM Servo Driver library).
 - **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) ✅ mini MJCF
   draft + `MINI_HEXAPOD` profile (placeholders flagged; IK round-trip exact,
   stands + walks under physics at ≤44% of stall torque); (3) ✅ JAX + gym

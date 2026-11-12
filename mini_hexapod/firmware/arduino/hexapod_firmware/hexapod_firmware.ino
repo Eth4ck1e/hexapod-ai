@@ -10,14 +10,17 @@
 //   4. I  IK demo   — verify foot tracking + signs
 //   5. W  walking   — verify gait via serial commands
 //   6. B  BT pairing — pair 8BitDo Pro 3 (stub for now)
+//   7. L  limits    — per-joint travel-range calibration (jog to each stop)
 //   X  export    — dump full config as C++
+//   J  export    — dump full config as JSON (feeds the simulator profile)
 //   R  reset NVS — factory defaults (confirm)
 //
 // All persists to ESP32 NVS:
-//   hexa_geom  body geometry + leg lengths
-//   hexa_trim  per-joint trim us
-//   hexa_sign  per-joint sign +1/-1
-//   hexa_gait  step length / height / period
+//   hexa_geom   body geometry + leg lengths
+//   hexa_trim   per-joint trim us
+//   hexa_sign   per-joint sign +1/-1
+//   hexa_gait   step length / height / period
+//   hexa_range  per-joint travel limits (us at each mechanical stop; 0 = unset)
 //
 // Serial Monitor: 115200, "Newline" line ending (works for both single-char
 // menu commands and multi-token geometry commands).
@@ -86,6 +89,13 @@ float R_HOME, D_HOME;
 uint16_t trim_us[6][3];
 int8_t   SIGN[6][3];
 float    HOME_KIN_ANGLE[3] = {0, 0, 0};
+// Travel limits measured in range mode: pulse width where the joint binds in
+// each direction. 0 = never calibrated. Kinematic angle at a pulse width:
+//   angle_rad = HOME_KIN_ANGLE[j] + SIGN[l][j] * (us - trim_us[l][j]) / US_PER_DEG * PI/180
+// (inverse of angleToUs), which is also the simulator's joint-angle convention
+// at the L-pose, so the JSON export maps straight into gait/robot_profile.py.
+uint16_t range_lo_us[6][3];
+uint16_t range_hi_us[6][3];
 
 // =========================== GAIT ===========================
 float         step_length    = 30.0f;
@@ -99,7 +109,7 @@ const float   TRIPOD_OFFS[6] = {0, 0, 0, 0.5f, 0.5f, 0.5f};
 // =========================== STATE MACHINE ===========================
 enum Mode {
   MODE_MAIN, MODE_GEOMETRY, MODE_TRIM, MODE_SIGN,
-  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT
+  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON
 };
 Mode current_mode = MODE_MAIN;
 
@@ -318,6 +328,28 @@ void saveSign(uint8_t leg, uint8_t joint, int8_t s) {
   SIGN[leg][joint] = s;
 }
 
+void loadRanges() {
+  prefs.begin("hexa_range", true);
+  char k[16];
+  for (uint8_t l = 0; l < 6; ++l) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      snprintf(k, 16, "lo_%d_%d", l, j); range_lo_us[l][j] = prefs.getUShort(k, 0);
+      snprintf(k, 16, "hi_%d_%d", l, j); range_hi_us[l][j] = prefs.getUShort(k, 0);
+    }
+  }
+  prefs.end();
+}
+
+void saveRange(uint8_t leg, uint8_t joint, uint16_t lo, uint16_t hi) {
+  prefs.begin("hexa_range", false);
+  char k[16];
+  snprintf(k, 16, "lo_%d_%d", leg, joint); prefs.putUShort(k, lo);
+  snprintf(k, 16, "hi_%d_%d", leg, joint); prefs.putUShort(k, hi);
+  prefs.end();
+  range_lo_us[leg][joint] = lo;
+  range_hi_us[leg][joint] = hi;
+}
+
 void loadGait() {
   prefs.begin("hexa_gait", true);
   step_length    = prefs.getFloat("step_len", step_length);
@@ -339,11 +371,14 @@ void wipeAllNvs() {
   prefs.begin("hexa_trim", false); prefs.clear(); prefs.end();
   prefs.begin("hexa_sign", false); prefs.clear(); prefs.end();
   prefs.begin("hexa_gait", false); prefs.clear(); prefs.end();
+  prefs.begin("hexa_range", false); prefs.clear(); prefs.end();
   resetGeometryToDefaults();
   for (uint8_t l = 0; l < 6; ++l) {
     for (uint8_t j = 0; j < 3; ++j) {
       trim_us[l][j] = SERVO_CTR_US;
       SIGN[l][j] = +1;
+      range_lo_us[l][j] = 0;
+      range_hi_us[l][j] = 0;
     }
   }
   step_length = 30.0f;
@@ -364,7 +399,9 @@ void printMainMenu() {
   Serial.println("  I  IK demo (foot control)");
   Serial.println("  W  walking controller");
   Serial.println("  B  bluetooth controller pairing (stub)");
+  Serial.println("  L  joint travel-limit calibration (jog to each stop)");
   Serial.println("  X  export full config as C++");
+  Serial.println("  J  export full config as JSON (for the simulator)");
   Serial.println("  R  reset all NVS to defaults (confirm)");
   Serial.println("  ?  reprint this menu");
   Serial.println("(within any mode: 'm' returns here)");
@@ -381,7 +418,9 @@ void handleMainMenu() {
       case 'I': case 'i': current_mode = MODE_IK;       return;
       case 'W': case 'w': current_mode = MODE_WALK;     return;
       case 'B': case 'b': current_mode = MODE_BT;       return;
+      case 'L': case 'l': current_mode = MODE_RANGE;    return;
       case 'X': case 'x': current_mode = MODE_EXPORT;   return;
+      case 'J': case 'j': current_mode = MODE_JSON;     return;
       case 'R': case 'r': {
         Serial.println("Reset ALL NVS to defaults? Type 'Y' to confirm.");
         char y = readKey();
@@ -958,6 +997,217 @@ void runBtMode() {
 }
 
 // ====================================================================
+// =                   RANGE (TRAVEL LIMIT) MODE                       =
+// ====================================================================
+// Finds where each joint physically binds so the simulator's joint ranges
+// (and the policy's action limits) match this chassis. Procedure per joint:
+//   jog toward one stop a few degrees at a time; the moment the link touches
+//   the body / adjacent link (or the servo starts to buzz), back off ONE
+//   notch and press '[' (low stop) — repeat toward the other side and press
+//   ']' (high stop) — then 's' saves both and moves on.
+// Never leave a servo pressing into a stop: it draws stall current.
+uint8_t  rng_cur_leg = 0, rng_cur_joint = 0;
+uint16_t rng_cur_us;
+uint16_t rng_lo_tmp = 0, rng_hi_tmp = 0;
+
+float usToKinRad(uint8_t leg, uint8_t joint, uint16_t us) {
+  float deg = ((float)us - (float)trim_us[leg][joint]) / US_PER_DEG;
+  return HOME_KIN_ANGLE[joint] + (float)SIGN[leg][joint] * deg * PI / 180.0f;
+}
+
+void rngPrompt() {
+  Serial.println();
+  Serial.print("[LIMITS "); Serial.print(LEGS[rng_cur_leg].name);
+  Serial.print(" "); Serial.print(JOINT_NAMES[rng_cur_joint]);
+  Serial.print("]  us="); Serial.print(rng_cur_us);
+  Serial.print("  trim="); Serial.print(trim_us[rng_cur_leg][rng_cur_joint]);
+  Serial.print("  marks lo/hi="); Serial.print(rng_lo_tmp); Serial.print("/"); Serial.print(rng_hi_tmp);
+  Serial.print("  saved="); Serial.print(range_lo_us[rng_cur_leg][rng_cur_joint]);
+  Serial.print("/"); Serial.println(range_hi_us[rng_cur_leg][rng_cur_joint]);
+}
+
+void rngHelp() {
+  Serial.println();
+  Serial.println("Limit commands (jog ONE notch past contact, then back off one):");
+  Serial.println("  a/d  -1/+1 deg     q/e  -5/+5 deg     z/c  -20/+20 deg");
+  Serial.println("  [    mark current us as LOW stop    ]  mark as HIGH stop");
+  Serial.println("  s    save marks & next joint   n  skip & next   b  back");
+  Serial.println("  t    return this joint to trim   h  home leg   H  home all");
+  Serial.println("  p    print state   l  list all (us + kinematic rad)");
+  Serial.println("  m    main menu     ?  help");
+}
+
+void rngApply() { cmdJointUs(rng_cur_leg, rng_cur_joint, rng_cur_us); }
+
+void rngNudge(float deg) {
+  float us = (float)rng_cur_us + deg * US_PER_DEG;
+  if (us < SERVO_MIN_US) us = SERVO_MIN_US;
+  if (us > SERVO_MAX_US) us = SERVO_MAX_US;
+  rng_cur_us = (uint16_t)(us + 0.5f);
+  rngApply();
+  Serial.print("  us="); Serial.print(rng_cur_us);
+  Serial.print("  ("); Serial.print(((float)rng_cur_us - (float)trim_us[rng_cur_leg][rng_cur_joint]) / US_PER_DEG, 1);
+  Serial.println(" deg from trim)");
+}
+
+void rngLoadJoint() {
+  rng_cur_us = trim_us[rng_cur_leg][rng_cur_joint];
+  rng_lo_tmp = range_lo_us[rng_cur_leg][rng_cur_joint];
+  rng_hi_tmp = range_hi_us[rng_cur_leg][rng_cur_joint];
+  rngApply();
+  rngPrompt();
+}
+
+void rngAdvance() {
+  cmdJointTrim(rng_cur_leg, rng_cur_joint);           // never leave a joint at a stop
+  if (++rng_cur_joint > 2) { rng_cur_joint = 0; rng_cur_leg = (rng_cur_leg + 1) % 6; }
+  rngLoadJoint();
+}
+
+void rngRetreat() {
+  cmdJointTrim(rng_cur_leg, rng_cur_joint);
+  if (rng_cur_joint == 0) { rng_cur_joint = 2; rng_cur_leg = (rng_cur_leg + 5) % 6; }
+  else                    { rng_cur_joint--; }
+  rngLoadJoint();
+}
+
+void rngList() {
+  Serial.println();
+  Serial.println("Travel limits  (us lo/hi  ->  kinematic rad min/max; 0/0 = not calibrated)");
+  for (uint8_t l = 0; l < 6; ++l) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      uint16_t lo = range_lo_us[l][j], hi = range_hi_us[l][j];
+      Serial.print("  "); Serial.print(LEGS[l].name); Serial.print(" ");
+      Serial.print(JOINT_NAMES[j]); Serial.print("\t");
+      Serial.print(lo); Serial.print("/"); Serial.print(hi);
+      if (lo && hi) {
+        float a = usToKinRad(l, j, lo), b = usToKinRad(l, j, hi);
+        Serial.print("\t-> "); Serial.print(fminf(a, b), 3); Serial.print(" .. "); Serial.print(fmaxf(a, b), 3);
+      }
+      Serial.println();
+    }
+  }
+}
+
+void runRangeMode() {
+  Serial.println();
+  Serial.println("=== JOINT TRAVEL-LIMIT CALIBRATION ===");
+  Serial.println("Body on a stand, legs free to move. Homing in 3s...");
+  delay(3000);
+  homeAll();
+  delay(500);
+  rngHelp();
+  rngLoadJoint();
+
+  while (current_mode == MODE_RANGE) {
+    char c = readKey();
+    switch (c) {
+      case 'a': rngNudge(-1);  break;
+      case 'd': rngNudge(+1);  break;
+      case 'q': rngNudge(-5);  break;
+      case 'e': rngNudge(+5);  break;
+      case 'z': rngNudge(-20); break;
+      case 'c': rngNudge(+20); break;
+      case '[': rng_lo_tmp = rng_cur_us; Serial.print("  LOW stop marked at "); Serial.println(rng_lo_tmp); break;
+      case ']': rng_hi_tmp = rng_cur_us; Serial.print("  HIGH stop marked at "); Serial.println(rng_hi_tmp); break;
+      case 's':
+        if (!rng_lo_tmp || !rng_hi_tmp) { Serial.println("  mark BOTH stops first ('[' and ']')"); break; }
+        if (rng_lo_tmp > rng_hi_tmp) { uint16_t t = rng_lo_tmp; rng_lo_tmp = rng_hi_tmp; rng_hi_tmp = t; }
+        saveRange(rng_cur_leg, rng_cur_joint, rng_lo_tmp, rng_hi_tmp);
+        Serial.print("  SAVED "); Serial.print(LEGS[rng_cur_leg].name); Serial.print(" ");
+        Serial.print(JOINT_NAMES[rng_cur_joint]); Serial.print(" = ");
+        Serial.print(rng_lo_tmp); Serial.print(" .. "); Serial.print(rng_hi_tmp); Serial.println(" us");
+        rngAdvance(); break;
+      case 'n': Serial.println("  (skipped)"); rngAdvance(); break;
+      case 'b': rngRetreat(); break;
+      case 't': rng_cur_us = trim_us[rng_cur_leg][rng_cur_joint]; rngApply();
+                Serial.print("  us="); Serial.println(rng_cur_us); break;
+      case 'h': homeLeg(rng_cur_leg); rng_cur_us = trim_us[rng_cur_leg][rng_cur_joint];
+                Serial.print("  Homed "); Serial.println(LEGS[rng_cur_leg].name); break;
+      case 'H': homeAll(); rng_cur_us = trim_us[rng_cur_leg][rng_cur_joint]; Serial.println("  Homed all."); break;
+      case 'p': rngPrompt(); break;
+      case 'l': rngList(); break;
+      case 'm': homeAll(); current_mode = MODE_MAIN; return;
+      case '?': rngHelp(); break;
+      default:  break;
+    }
+  }
+}
+
+// ====================================================================
+// =                        JSON EXPORT MODE                           =
+// ====================================================================
+// One JSON object between BEGIN_JSON / END_JSON. Copy it into
+// mini_hexapod/calibration/<date>.json and run
+//   python tools/import_mini_calibration.py <file>
+// which prints the matching gait/robot_profile.py + MJCF generator values.
+// Units: mm, us, rad. Leg order is the firmware's (FR MR RR FL ML RL).
+void jsonArr3(const char* key, const uint16_t v[3]) {
+  Serial.print("\""); Serial.print(key); Serial.print("\": [");
+  for (uint8_t j = 0; j < 3; ++j) { Serial.print(v[j]); if (j < 2) Serial.print(", "); }
+  Serial.print("]");
+}
+
+void runJsonMode() {
+  Serial.println();
+  Serial.println("BEGIN_JSON");
+  Serial.println("{");
+  Serial.println("  \"firmware\": \"mini_hexapod unified v0.2\",");
+  Serial.print("  \"servo\": {\"min_us\": "); Serial.print(SERVO_MIN_US);
+  Serial.print(", \"max_us\": "); Serial.print(SERVO_MAX_US);
+  Serial.print(", \"us_per_deg\": "); Serial.print(US_PER_DEG, 4);
+  Serial.print(", \"pwm_hz\": "); Serial.print(PWM_FREQ_HZ); Serial.println("},");
+  Serial.print("  \"geometry_mm\": {\"L2\": "); Serial.print(L2, 2);
+  Serial.print(", \"L3\": "); Serial.print(L3, 2);
+  Serial.print(", \"R_HOME\": "); Serial.print(R_HOME, 2);
+  Serial.print(", \"D_HOME\": "); Serial.print(D_HOME, 2); Serial.println("},");
+  Serial.print("  \"home_kin_angle_rad\": [");
+  for (uint8_t j = 0; j < 3; ++j) { Serial.print(HOME_KIN_ANGLE[j], 5); if (j < 2) Serial.print(", "); }
+  Serial.println("],");
+  Serial.print("  \"gait\": {\"step_length_mm\": "); Serial.print(step_length, 1);
+  Serial.print(", \"step_height_mm\": "); Serial.print(step_height, 1);
+  Serial.print(", \"step_period_ms\": "); Serial.print(step_period_ms); Serial.println("},");
+  Serial.println("  \"joints\": [\"COXA\", \"FEMUR\", \"KNEE\"],");
+  Serial.println("  \"legs\": [");
+  for (uint8_t l = 0; l < 6; ++l) {
+    Serial.print("    {\"name\": \""); Serial.print(LEGS[l].name);
+    Serial.print("\", \"right\": "); Serial.print(LEGS[l].is_right ? "true" : "false");
+    Serial.print(", \"board\": "); Serial.print(LEGS[l].board_addr);
+    Serial.print(", \"channels\": ["); Serial.print(LEGS[l].channels[0]); Serial.print(", ");
+    Serial.print(LEGS[l].channels[1]); Serial.print(", "); Serial.print(LEGS[l].channels[2]); Serial.println("],");
+    Serial.print("     \"coxa_mm\": ["); Serial.print(COXA_X[l], 2); Serial.print(", ");
+    Serial.print(COXA_Y[l], 2); Serial.print(", "); Serial.print(COXA_Z[l], 2);
+    Serial.print("], \"axis_rad\": "); Serial.print(AXIS_RAD[l], 6); Serial.println(",");
+    Serial.print("     "); jsonArr3("trim_us", trim_us[l]); Serial.println(",");
+    Serial.print("     \"sign\": ["); 
+    for (uint8_t j = 0; j < 3; ++j) { Serial.print((int)SIGN[l][j]); if (j < 2) Serial.print(", "); }
+    Serial.println("],");
+    Serial.print("     "); jsonArr3("range_lo_us", range_lo_us[l]); Serial.println(",");
+    Serial.print("     "); jsonArr3("range_hi_us", range_hi_us[l]); Serial.println(",");
+    Serial.print("     \"range_kin_rad\": [");
+    for (uint8_t j = 0; j < 3; ++j) {
+      uint16_t lo = range_lo_us[l][j], hi = range_hi_us[l][j];
+      if (lo && hi) {
+        float a = usToKinRad(l, j, lo), b = usToKinRad(l, j, hi);
+        Serial.print("["); Serial.print(fminf(a, b), 4); Serial.print(", "); Serial.print(fmaxf(a, b), 4); Serial.print("]");
+      } else {
+        Serial.print("null");
+      }
+      if (j < 2) Serial.print(", ");
+    }
+    Serial.println("]");
+    Serial.print("    }"); Serial.println(l < 5 ? "," : "");
+  }
+  Serial.println("  ]");
+  Serial.println("}");
+  Serial.println("END_JSON");
+  Serial.println();
+  Serial.println("Press any key for main menu.");
+  readKey();
+  current_mode = MODE_MAIN;
+}
+
+// ====================================================================
 // =                          EXPORT MODE                              =
 // ====================================================================
 void runExportMode() {
@@ -1006,6 +1256,19 @@ void runExportMode() {
   Serial.println("};");
 
   Serial.println();
+  Serial.println("// ---- Travel limits (us at each stop; 0 = not calibrated) ----");
+  Serial.println("constexpr uint16_t RANGE_US[6][3][2] = {");
+  for (uint8_t l = 0; l < 6; ++l) {
+    Serial.print("  /* "); Serial.print(LEGS[l].name); Serial.print(" */ {");
+    for (uint8_t j = 0; j < 3; ++j) {
+      Serial.print("{"); Serial.print(range_lo_us[l][j]); Serial.print(", "); Serial.print(range_hi_us[l][j]); Serial.print("}");
+      if (j < 2) Serial.print(", ");
+    }
+    Serial.println("},");
+  }
+  Serial.println("};");
+
+  Serial.println();
   Serial.println("// ---- Gait ----");
   Serial.print("constexpr float STEP_LENGTH    = "); Serial.print(step_length);    Serial.println("f;");
   Serial.print("constexpr float STEP_HEIGHT    = "); Serial.print(step_height);    Serial.println("f;");
@@ -1025,7 +1288,7 @@ void setup() {
   delay(1000);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println("  mini_hexapod unified firmware  v0.1");
+  Serial.println("  mini_hexapod unified firmware  v0.2");
   Serial.println("==========================================");
 
   Wire.begin();
@@ -1041,9 +1304,10 @@ void setup() {
   loadTrims();
   loadSigns();
   loadGait();
+  loadRanges();
   computeHomeKinAngles();
 
-  Serial.println("Loaded geometry, trims, signs, gait params from NVS.");
+  Serial.println("Loaded geometry, trims, signs, gait params, travel limits from NVS.");
   Serial.println("Tip: set Serial Monitor to 'Newline' line ending.");
 }
 
@@ -1057,5 +1321,7 @@ void loop() {
     case MODE_WALK:     runWalkMode(); break;
     case MODE_BT:       runBtMode(); break;
     case MODE_EXPORT:   runExportMode(); break;
+    case MODE_RANGE:    runRangeMode(); break;
+    case MODE_JSON:     runJsonMode(); break;
   }
 }
