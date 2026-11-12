@@ -193,8 +193,8 @@ def main():
     # Precompute partition-disc bin (v23+) — one int per transition,
     # in [0, 149]. Saved alongside cmds_t so training doesn't need to
     # recompute on load.
-    from envs.cmd_bins import cmd_to_bin
-    bin_idx = np.asarray(cmd_to_bin(jnp.asarray(cmd_t))).astype(np.int32)
+    from envs.cmd_bins import bin_spec_for, cmd_to_bin
+    bin_idx = np.asarray(cmd_to_bin(jnp.asarray(cmd_t), bin_spec_for(args.model))).astype(np.int32)
     print(f"  bin distribution: {np.bincount(bin_idx, minlength=150).min()} min, "
           f"{int(np.median(np.bincount(bin_idx, minlength=150)))} median, "
           f"{np.bincount(bin_idx, minlength=150).max()} max per bin")

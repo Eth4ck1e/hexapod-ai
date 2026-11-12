@@ -64,29 +64,23 @@ CMD_MASKS = {
 }
 
 # v20 (2026-05-10) — height-conditional stance width envelope. Coefficients
-# imported from envs/stance_envelope.py (single source of truth shared with
-# scripts/demo_phases.py and tools/watch_scaffold.py). When the verified
-# bounds change, edit stance_envelope.py — env, watch tests, and tuner all
-# pick up the new values automatically.
+# come from the robot profile via envs/stance_envelope.py (single source of
+# truth shared with scripts/demo_phases.py and tools/watch_scaffold.py) and
+# are carried in EnvParams.dw_envelope so one env module serves every robot.
 from envs import stance_envelope as _stance
 
-MAX_DW_INTERCEPT = jnp.float32(_stance.MAX_DW_INTERCEPT)
-MAX_DW_SLOPE     = jnp.float32(_stance.MAX_DW_SLOPE)
-MIN_DW_INTERCEPT = jnp.float32(_stance.MIN_DW_INTERCEPT)
-MIN_DW_SLOPE     = jnp.float32(_stance.MIN_DW_SLOPE)
-
 # Tibia body names in canonical leg order. Foot tip is computed as
-# tibia-world + tibia-rotation @ (0.134, 0.031, 0). This matches the gym
-# env's _FOOT_LOCAL_OFFSET and the Controller's calibrated FOOT_TIP_LOCAL
-# (geom_pos of the foot sphere = sphere center). Using sphere bottom
-# (z=-0.008) instead would be more physically correct for "ground contact
-# point" but creates an 8mm systematic offset relative to the scaffold's
+# tibia-world + tibia-rotation @ foot_local_offset, where the offset is the
+# Controller's calibrated FOOT_TIP_LOCAL (geom_pos of the foot sphere =
+# sphere center; PhantomX (0.134, 0.031, 0), mini (0.0895, 0, 0)). Using the
+# sphere bottom instead would be more physically correct for "ground
+# contact point" but creates a systematic offset relative to the scaffold's
 # intended foot position (which the Controller computes at the sphere
 # center). For reward-parity with the gym env we use the sphere center
-# everywhere, with FOOT_CONTACT_Z compensating in the contact threshold.
+# everywhere, with the profile's foot_contact_z compensating in the contact
+# threshold.
 _LEG_NAMES         = ("RR", "RM", "RF", "LR", "LM", "LF")
 _TIBIA_BODY_NAMES  = tuple(f"tibia_{n}" for n in _LEG_NAMES)
-_FOOT_LOCAL_OFFSET = jnp.array([0.134, 0.031, 0.0], dtype=jnp.float32)
 
 # No-progress ring buffer length — must be a JIT-compile-time constant.
 NO_PROGRESS_WINDOW = 400
@@ -95,6 +89,26 @@ NO_PROGRESS_WINDOW = 400
 # ----------------------------------------------------------------------------
 # Static config — NamedTuple of JAX-compatible values.
 # ----------------------------------------------------------------------------
+class ObsConfig(NamedTuple):
+    """Observation layout switches (envs/obs_layout.py). Registered below as
+    a LEAF-LESS pytree so EnvParams can be passed straight through jax.jit /
+    vmap (several tools do) — the values travel as static aux data, never as
+    traced arrays, which is what the branch in _get_obs() needs.
+      variant       "full"     : true joint state + IMU + body linvel (PhantomX, v27)
+                    "hardware" : commanded joint angle + Δ/dt, IMU (or constants
+                                 when imu_available=False), no body linvel (mini)
+    """
+    variant:       str  = "full"
+    imu_available: bool = True
+
+
+jax.tree_util.register_pytree_node(
+    ObsConfig,
+    lambda cfg: ((), cfg),            # no children; whole config is aux data
+    lambda aux, children: aux,
+)
+
+
 class EnvParams(NamedTuple):
     mjx_model:         mjx.Model
     gait:              gait_jax.GaitParams
@@ -108,6 +122,7 @@ class EnvParams(NamedTuple):
     base_body_id:      int           # body id of "base"
     tibia_body_ids:    jnp.ndarray   # (6,) int32 — foot tip = xpos[tib] + R[tib] @ offset
     foot_local_offset: jnp.ndarray   # (3,) tibia-local foot-tip offset
+    dw_envelope:       jnp.ndarray   # (4,) max_int, max_slope, min_int, min_slope (dh-conditional dw)
     # Reward weights and gates.
     # DEPRECATED weights (post-2026-05-07 paper-aligned redesign). Kept as
     # fields for backward compat with any code that constructs EnvParams
@@ -259,6 +274,9 @@ class EnvParams(NamedTuple):
     max_push_force_n:          float = 8.0       # full-curriculum force in newtons
     disturbance_magnitude_scale: float = 1.0     # 0.0 = no push, 1.0 = full magnitude
 
+    # Observation layout — see ObsConfig (static aux data, jit-safe).
+    obs_cfg: ObsConfig = ObsConfig()
+
 
 class EnvState(NamedTuple):
     mjx_data:           mjx.Data
@@ -289,8 +307,11 @@ class EnvState(NamedTuple):
     # v25 (2026-05-13): EMA-filtered motion velocities [vx_body, vy_body, wz].
     # Used in tracking reward to defeat the "wobble to fake velocity" exploit.
     linvel_ema:           jnp.ndarray  # (3,)
+    # Joint targets applied at the previous step — the "hardware" obs
+    # variant reports commanded angle + finite-difference velocity.
+    prev_ctrl:            jnp.ndarray  # (18,)
     gait_scale:         jnp.ndarray   # () float32 — externally mutable curriculum
-    obs:                jnp.ndarray   # (78,)
+    obs:                jnp.ndarray   # (obs_dim(variant),) — 78 "full", 75 "hardware"
     reward:             jnp.ndarray   # ()
     done:               jnp.ndarray   # () bool
     rng:                jax.Array
@@ -321,12 +342,14 @@ def make_env_params(model_path: str,
     gait = gait_jax.build_params(model_path, dtype=jnp.float32)
 
     np_ctrl = gait_jax.Controller(model_path)
+    profile = np_ctrl.profile          # gait/robot_profile.py — chassis SoT
+    stance  = _stance.envelope_for(profile)
     gait_neutral = jnp.asarray(np_ctrl.gait_neutral_pose, dtype=jnp.float32)
     max_speed    = float(np_ctrl.MAX_SPEED)
     max_yaw_rate = float(np_ctrl.MAX_YAW_RATE)
 
-    FULL_HEIGHT_DEV = 0.025
-    FULL_WIDTH_DEV  = 0.020   # ±20mm covers the ±15mm cmd range with margin
+    FULL_HEIGHT_DEV = profile.height_dev      # PhantomX 0.025
+    FULL_WIDTH_DEV  = profile.width_dev       # PhantomX 0.020 — covers the cmd range with margin
     FULL_PITCH_DEV  = math.radians(15)
     FULL_ROLL_DEV   = math.radians(15)
     err_inv_scales = jnp.array([
@@ -352,15 +375,15 @@ def make_env_params(model_path: str,
         [-max_yaw_rate, max_yaw_rate],                            # wz
         [-math.radians(10), math.radians(10)],                    # pitch
         [-math.radians(15), math.radians(15)],                    # roll
-        [_stance.DH_MIN, _stance.DH_MAX],                         # height (v20: was ±0.020)
-        [_stance.DW_JOINT_MIN, _stance.DW_JOINT_MAX],             # width (joint range; actual sampler clips per dh)
+        [stance.dh_min, stance.dh_max],                           # height (v20: was ±0.020)
+        [stance.dw_joint_min, stance.dw_joint_max],               # width (joint range; actual sampler clips per dh)
         [-0.030, 0.030],                                          # shift_x
         [-0.030, 0.030],                                          # shift_y
     ], dtype=jnp.float32)
 
     nq = mj_model.nq
     spawn_qpos = jnp.zeros(nq, dtype=jnp.float32)
-    spawn_qpos = spawn_qpos.at[2].set(0.18)
+    spawn_qpos = spawn_qpos.at[2].set(profile.spawn_z)
     spawn_qpos = spawn_qpos.at[3].set(1.0)
     spawn_qpos = spawn_qpos.at[7:25].set(gait_neutral)
 
@@ -370,7 +393,28 @@ def make_env_params(model_path: str,
     )
     base_body_id = int(mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "base"))
 
+    # Foot-tip offset from the Controller's calibration (foot sphere centre in
+    # the tibia frame). All six legs share one offset on every supported MJCF;
+    # we take the mean and refuse a model where they disagree.
+    foot_tip = np.asarray(np_ctrl.FOOT_TIP_LOCAL, dtype=np.float64)    # (6, 3)
+    if np.ptp(foot_tip, axis=0).max() > 1e-3:
+        raise ValueError(f"per-leg foot offsets differ by >1 mm in {model_path}: {foot_tip}")
+    foot_local_offset = jnp.asarray(foot_tip.mean(axis=0), dtype=jnp.float32)
+
     return EnvParams(
+        # --- chassis-specific values from the robot profile ---
+        min_z=profile.min_body_z,
+        ref_body_z=profile.ref_body_z,
+        foot_contact_z=profile.foot_contact_z,
+        joint_vel_limit=profile.joint_vel_limit,
+        joint_torque_limit=profile.joint_torque_limit,
+        foot_force_limit=profile.foot_force_limit,
+        foot_residual_scale_max=profile.foot_residual_scale,
+        init_body_z_noise_m=profile.init_body_z_noise,
+        obs_cfg=ObsConfig(variant=profile.obs_variant,
+                          imu_available=profile.imu_available),
+        dw_envelope=jnp.asarray(stance.dw_coeffs, dtype=jnp.float32),
+        # --- run configuration ---
         cmd_dynamics_enabled=cmd_dynamics_enabled,
         disturbance_enabled=disturbance_enabled,
         disturbance_magnitude_scale=disturbance_magnitude_scale,
@@ -387,7 +431,7 @@ def make_env_params(model_path: str,
         spawn_qpos=spawn_qpos,
         base_body_id=base_body_id,
         tibia_body_ids=tibia_body_ids,
-        foot_local_offset=_FOOT_LOCAL_OFFSET,
+        foot_local_offset=foot_local_offset,
     )
 
 
@@ -420,10 +464,11 @@ def _sample_cmd(params: EnvParams, rng: jax.Array) -> jnp.ndarray:
     dh    = jax.random.uniform(rngs[7], (),
                                minval=params.cmd_sample_ranges[5, 0],
                                maxval=params.cmd_sample_ranges[5, 1])
-    # dh-conditional dw envelope: linear lower-bound fit verified in
-    # tools/watch_scaffold.py --interactive on the mesh model.
-    max_dw_at_dh = MAX_DW_INTERCEPT + MAX_DW_SLOPE * dh
-    min_dw_at_dh = MIN_DW_INTERCEPT + MIN_DW_SLOPE * dh
+    # dh-conditional dw envelope (robot profile → EnvParams.dw_envelope):
+    # linear inner fit of the verified / derived safe stance region.
+    env_ = params.dw_envelope
+    max_dw_at_dh = env_[0] + env_[1] * dh
+    min_dw_at_dh = env_[2] + env_[3] * dh
     dw    = jax.random.uniform(rngs[8], (), minval=min_dw_at_dh, maxval=max_dw_at_dh)
     # sx, sy use spare hashes off rngs[0] / rngs[1] to avoid burning more splits.
     sx_key, sy_key = jax.random.split(rngs[0])
@@ -758,16 +803,31 @@ def _compute_done(params: EnvParams,
 # ----------------------------------------------------------------------------
 # Observation
 # ----------------------------------------------------------------------------
-def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint):
+def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint, prev_ctrl):
     from envs.obs_layout import compose_obs
     qpos = mjx_data.qpos
     qvel = mjx_data.qvel
     phase = (sim_time / params.gait.gait_period) % 1.0
+    if params.obs_cfg.variant == "hardware":
+        # Open-loop servos: the only joint signal the firmware has is what it
+        # commanded. ctrl is the target applied THIS step; prev_ctrl the one
+        # before, so the finite difference is a one-step commanded velocity.
+        dt = params.mjx_model.opt.timestep
+        joint_pos = mjx_data.ctrl
+        joint_vel = (mjx_data.ctrl - prev_ctrl) / dt
+    else:
+        joint_pos = qpos[7:25]
+        joint_vel = qvel[6:24]
+    if params.obs_cfg.imu_available:
+        imu_quat, imu_gyro = qpos[3:7], qvel[3:6]
+    else:
+        imu_quat = jnp.array([1.0, 0.0, 0.0, 0.0], dtype=jnp.float32)
+        imu_gyro = jnp.zeros(3, dtype=jnp.float32)
     return compose_obs(
-        joint_pos       = qpos[7:25],
-        joint_vel       = qvel[6:24],
-        imu_quat        = qpos[3:7],
-        imu_gyro        = qvel[3:6],
+        joint_pos       = joint_pos,
+        joint_vel       = joint_vel,
+        imu_quat        = imu_quat,
+        imu_gyro        = imu_gyro,
         imu_accel       = jnp.zeros(3, dtype=jnp.float32),
         scaffold_hint   = scaffold_hint.reshape(-1),
         phase_sc        = jnp.array([jnp.sin(2.0 * jnp.pi * phase),
@@ -775,6 +835,7 @@ def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint):
         cmd             = cmd,
         body_linvel     = _body_frame_linvel(qpos, qvel),
         concat_fn       = jnp.concatenate,
+        variant         = params.obs_cfg.variant,
     )
 
 
@@ -826,7 +887,8 @@ def reset(params: EnvParams,
     progress_idx  = jnp.int32(0)
     progress_full = jnp.bool_(False)
 
-    obs = _get_obs(params, mjx_data, cmd, sim_time, feet_body)
+    prev_ctrl = params.gait_neutral_pose
+    obs = _get_obs(params, mjx_data, cmd, sim_time, feet_body, prev_ctrl)
 
     zero = jnp.float32(0.0)
     metrics_zero = {
@@ -899,6 +961,7 @@ def reset(params: EnvParams,
         push_remaining=jnp.int32(0),
         next_push_in=next_push_in,
         linvel_ema=jnp.zeros(3, dtype=jnp.float32),
+        prev_ctrl=prev_ctrl,
     )
 
 
@@ -1070,7 +1133,7 @@ def step(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvState:
         (scaffold_joints - params.gait_neutral_pose) / params.residual_scale_max,
         -1.0, 1.0)
 
-    obs = _get_obs(params, mjx_data, state.cmd, sim_time, feet_body)
+    obs = _get_obs(params, mjx_data, state.cmd, sim_time, feet_body, state.prev_ctrl)
 
     metrics = dict(reward_metrics)
     metrics["bc_target"]   = bc_target
@@ -1107,6 +1170,7 @@ def step(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvState:
         push_remaining=new_push_rem,
         next_push_in=new_next_in,
         linvel_ema=new_linvel_ema,
+        prev_ctrl=target,
     )
 
 
@@ -1176,7 +1240,7 @@ def step_foot(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvSta
     # foot-space mode and start PPO from a fresh small-init policy.
     bc_target = jnp.zeros_like(action)
 
-    obs = _get_obs(params, mjx_data, state.cmd, sim_time, feet_body)
+    obs = _get_obs(params, mjx_data, state.cmd, sim_time, feet_body, state.prev_ctrl)
 
     metrics = dict(reward_metrics)
     metrics["bc_target"]   = bc_target
@@ -1213,6 +1277,7 @@ def step_foot(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvSta
         push_remaining=new_push_rem,
         next_push_in=new_next_in,
         linvel_ema=new_linvel_ema,
+        prev_ctrl=target,
     )
 
 

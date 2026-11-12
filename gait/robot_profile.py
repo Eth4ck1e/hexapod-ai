@@ -96,17 +96,55 @@ class RobotProfile:
     # env / training scripts only ever carry a MODEL_PATH.
     model_patterns: tuple = ()
 
+    # --- scaffold behaviour --------------------------------------------------
+    # Arc-aware turn-while-walking exists only in the numpy controller; the
+    # JAX port (training) always superposes translate + spin. Robots trained
+    # with the JAX env should set this False so eval/watch see the same
+    # scaffold the policy was trained against. PhantomX keeps True for
+    # backward compatibility with its existing checkpoints and priors.
+    arc_turning: bool = True
+
+    # --- stance envelope (cmd[5] = dh, cmd[6] = dw) --------------------------
+    # dh NEGATIVE = body raised, POSITIVE = squat. dw is dh-conditional:
+    #   max_dw(dh) = max_dw_intercept + max_dw_slope * dh
+    #   min_dw(dh) = min_dw_intercept + min_dw_slope * dh
+    # PhantomX numbers were verified by eye on the mesh model (2026-05-10);
+    # other robots: tools/derive_stance_envelope.py gives a kinematic inner
+    # bound. envs/stance_envelope.py and envs/cmd_bins.py consume these.
+    dh_min: float = -0.045
+    dh_max: float = +0.035
+    height_presets: tuple = (-0.045, -0.025, -0.005, +0.015, +0.035)
+    max_dw_intercept: float = 0.0703
+    max_dw_slope: float = 0.8333
+    min_dw_intercept: float = -0.0283
+    min_dw_slope: float = 0.2500
+    dw_joint_min: float = -0.040          # min over all dh (rectangular bound)
+    dw_joint_max: float = +0.100          # max over all dh
+
     # --- sim / env parameters (PhantomX defaults = envs/hexapod_env_jax.py
-    # EnvParams as of v27). The envs don't read these yet; they will when the
-    # mini-hexapod env variant lands. Kept here so a robot is fully described
-    # in one place.
+    # EnvParams as of v27). make_env_params() reads these via the Controller's
+    # profile, so a robot is fully described in one place.
     spawn_z: float = 0.18                 # body z at reset
     ref_body_z: float = 0.13              # neutral-stance body height reference
     min_body_z: float = 0.05              # fall threshold
     foot_radius: float = 0.008            # contact sphere radius (m)
+    foot_contact_z: float = 0.005         # foot-centre z below this = in contact
     joint_vel_limit: float = 6.18         # motor no-load max (rad/s)
     joint_torque_limit: float = 1.5       # motor stall (N·m)
     foot_force_limit: float = 30.0        # per-foot force ceiling (N)
+    height_dev: float = 0.025             # "full" height tracking error (m)
+    width_dev: float = 0.020              # "full" width tracking error (m)
+    foot_residual_scale: float = 0.020    # foot-space action authority (m per unit)
+    init_body_z_noise: float = 0.010      # spawn-height DR (m)
+
+    # --- policy observation ---------------------------------------------------
+    # "full": the v27 78-dim obs (true joint state + IMU + body linvel).
+    # "hardware": only what an open-loop-servo bot can measure — commanded
+    #   joint angle + its finite difference, IMU quat/gyro (zeroed when
+    #   imu_available=False), scaffold hint, phase, cmd. No body linvel.
+    # See envs/obs_layout.py.
+    obs_variant: str = "full"
+    imu_available: bool = True
 
     def __post_init__(self):
         # Normalise array fields so callers can pass lists.
@@ -135,7 +173,7 @@ PHANTOMX = RobotProfile(
     name="phantomx",
     model_path="models/phantomx_simple_mjx.xml",
     model_patterns=("phantomx*.xml",),
-    spawn_z=0.18, ref_body_z=0.13, min_body_z=0.05, foot_radius=0.008,
+    spawn_z=0.18, ref_body_z=0.13, min_body_z=0.06, foot_radius=0.008,
     joint_vel_limit=6.18, joint_torque_limit=1.5, foot_force_limit=30.0,
     leg_body_yaw=[
         -math.radians(135), -math.radians(90), -math.radians(45),
@@ -249,6 +287,25 @@ MINI_HEXAPOD = RobotProfile(
     joint_vel_limit=10.5,
     joint_torque_limit=0.18,
     foot_force_limit=8.0,                   # ~2× bodyweight-per-tripod-foot
+    # Train/eval parity: the JAX controller has no arc mode.
+    arc_turning=False,
+    # Kinematic inner envelope from tools/derive_stance_envelope.py
+    # (2026-11-12, placeholder MJCF, 3° joint margin, 90% dh shrink).
+    # Re-derive after the real bot is measured.
+    dh_min=-0.028, dh_max=0.032,
+    height_presets=(-0.028, -0.013, 0.002, 0.017, 0.032),
+    max_dw_intercept=0.0297, max_dw_slope=0.7714,
+    min_dw_intercept=-0.0229, min_dw_slope=0.5890,
+    dw_joint_min=-0.040, dw_joint_max=0.055,
+    # Env scales ≈ PhantomX × leg-length ratio (0.65).
+    foot_contact_z=_MINI_FOOT_R + 0.002,
+    height_dev=0.016,
+    width_dev=0.013,
+    foot_residual_scale=0.012,
+    init_body_z_noise=0.006,
+    # Deployment reality: open-loop servos, IMU not fitted yet.
+    obs_variant="hardware",
+    imu_available=False,
 )
 
 

@@ -90,7 +90,10 @@ from amp.discriminator import (
     discriminator_loss,
     multihead_discriminator_loss,
 )
-from envs.cmd_bins import N_BINS, cmd_to_bin
+from envs.cmd_bins import N_BINS, bin_spec_for, cmd_to_bin
+
+# Robot-specific partition edges (PhantomX: frozen v23 spec; others derived from profile).
+_BIN_SPEC = bin_spec_for(MODEL_PATH)
 from envs.hexapod_amp_env import HexapodAMPEnv
 
 # v11+: paper-matching Actor (Chen et al. uses 256, 128, 64 for the
@@ -385,7 +388,7 @@ def _collect_policy_transitions(env: HexapodAMPEnv, make_inference_fn,
             jax.vmap(cmd_for_disc)(cmd_pre),
         ], axis=-1)
         # Also emit the bin index (v23+) for partition-disc training.
-        bin_per_env = jax.vmap(cmd_to_bin)(cmd_pre)                # (n_envs,)
+        bin_per_env = jax.vmap(lambda c: cmd_to_bin(c, _BIN_SPEC))(cmd_pre)   # (n_envs,)
         return new_state, (transition, bin_per_env)
 
     state, (all_trans, all_bins) = jax.lax.scan(vstep, state, jnp.arange(n_steps))

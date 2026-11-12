@@ -149,7 +149,7 @@ class HexapodEnv(gym.Env):
     YAW_GATE          = 0.05    # rad/s
     TILT_GATE         = math.radians(3.0)   # 3° in rad
 
-    MIN_Z          = 0.06   # body height below this = fallen
+    MIN_Z          = 0.06   # PhantomX default; overridden per instance from the robot profile
     # qx² + qy² = sin²(θ/2). 30° absolute safety net = sin²(15°) ≈ 0.067.
     # The PRIMARY tilt-failure check is now deviation-based (TILT_DEV_LIMIT
     # below) — the bot is allowed to track high commanded pitch/roll up to
@@ -168,7 +168,7 @@ class HexapodEnv(gym.Env):
     # at step 0. During grace, only the absolute MAX_TILT_SQ (30°) safety
     # net is active; the per-axis deviation check is suspended.
     TILT_DEV_GRACE = 400   # 2 s @ dt=0.005 s
-    REF_BODY_Z     = 0.13   # nominal standing height (used to keep height tracking sensible)
+    REF_BODY_Z     = 0.13   # PhantomX default; overridden per instance from the robot profile
 
     # Linear speed-tracking penalty. The gaussian tracking reward exp(-err²) is
     # too forgiving near small errors — at cmd_speed=0.04 m/s and actual=0,
@@ -206,7 +206,7 @@ class HexapodEnv(gym.Env):
     #     Encourages stepping (lifting feet) rather than gliding on all 6.
     #     We do NOT penalize <3 feet contact — that would forbid emergent
     #     bounding/jumping/rolling gaits the policy might discover.
-    FOOT_CONTACT_Z       = 0.005  # foot-tip world z below this = in contact
+    FOOT_CONTACT_Z       = 0.005  # PhantomX default; overridden per instance from the robot profile
     SLIDING_W            = 2.0    # per (m/s × foot-in-contact) above deadzone
     SLIDING_DEADZONE     = 0.010  # m/s — small slip is unavoidable, don't punish
     EXCESS_CONTACT_W     = 0.05   # per foot beyond 3 in simultaneous contact
@@ -219,7 +219,8 @@ class HexapodEnv(gym.Env):
     # 30 steps × 0.005 dt = 0.15 s minimum stance.
     MIN_CONTACT_STEPS    = 30
     SHORT_CONTACT_W      = 0.5    # per lift-off event below MIN_CONTACT_STEPS
-    # Foot tip in tibia-local frame. See CLAUDE.md / docs/kinematics.md.
+    # Foot tip in tibia-local frame (PhantomX default; overridden per instance
+    # from the Controller's calibrated FOOT_TIP_LOCAL). See docs/kinematics.md.
     _FOOT_LOCAL_OFFSET   = np.array([0.134, 0.031, 0.0], dtype=np.float64)
     _TIBIA_BODY_NAMES    = ("tibia_RR", "tibia_RM", "tibia_RF",
                             "tibia_LR", "tibia_LM", "tibia_LF")
@@ -295,6 +296,21 @@ class HexapodEnv(gym.Env):
 
         # Gait controller — the analytical scaffold.
         self._ctrl = Controller(self._model_path)
+        # Chassis-specific numbers come from the robot profile (gait/robot_profile.py)
+        # — same source the JAX env's make_env_params() reads, so watch / eval /
+        # record see the same termination + contact semantics as training.
+        prof = self._ctrl.profile
+        self.profile        = prof
+        self.MIN_Z          = prof.min_body_z
+        self.REF_BODY_Z     = prof.ref_body_z
+        self.FOOT_CONTACT_Z = prof.foot_contact_z
+        self._spawn_z       = prof.spawn_z
+        self._obs_variant   = prof.obs_variant
+        self._imu_available = prof.imu_available
+        foot_tip = np.asarray(self._ctrl.FOOT_TIP_LOCAL, dtype=np.float64)
+        if np.ptp(foot_tip, axis=0).max() > 1e-3:
+            raise ValueError(f"per-leg foot offsets differ by >1 mm: {foot_tip}")
+        self._FOOT_LOCAL_OFFSET = foot_tip.mean(axis=0)
 
         # Per-slot tracking error scales. Normalizes errors so that a "full
         # deviation" on any slot contributes roughly 1.0 to the error norm
@@ -302,7 +318,7 @@ class HexapodEnv(gym.Env):
         # height in meters) barely affect the reward while slots with larger
         # magnitudes (e.g., velocities) dominate. Inverse-multiplied, so a
         # full-scale deviation in any slot drops the gaussian reward by ~63%.
-        FULL_HEIGHT_DEV = 0.025         # 25 mm height drift = "full" penalty
+        FULL_HEIGHT_DEV = prof.height_dev   # PhantomX 25 mm height drift = "full" penalty
         FULL_PITCH_DEV  = math.radians(15)
         FULL_ROLL_DEV   = math.radians(15)
         self._err_inv_scales = np.array([
@@ -332,8 +348,9 @@ class HexapodEnv(gym.Env):
 
         # Obs layout is owned by envs/obs_layout.py — single source of truth
         # shared with hexapod_env_jax.py so layout changes can't drift apart.
-        from envs.obs_layout import OBS_DIM
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(OBS_DIM,), dtype=np.float32)
+        from envs.obs_layout import obs_dim
+        self.observation_space = spaces.Box(-np.inf, np.inf,
+                                            shape=(obs_dim(self._obs_variant),), dtype=np.float32)
         self.action_space      = spaces.Box(-1.0, 1.0, shape=(self.ACTION_DIM,), dtype=np.float32)
 
         # Episode-mutable state.
@@ -381,7 +398,7 @@ class HexapodEnv(gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetData(self._model, self._data)
 
-        self._data.qpos[2]    = 0.18           # spawn just above the ground
+        self._data.qpos[2]    = self._spawn_z  # spawn just above the ground
         self._data.qpos[3]    = 1.0            # quat w (upright)
         # Use the controller's widened gait-time neutral, NOT the hardcoded
         # NEUTRAL_POSE (which corresponds to the un-widened calibrated rest).
@@ -390,6 +407,7 @@ class HexapodEnv(gym.Env):
         gait_neutral = self._ctrl.gait_neutral_pose.astype(np.float32)
         self._data.qpos[7:25] = gait_neutral
         self._data.ctrl[:]    = gait_neutral
+        self._prev_ctrl       = gait_neutral.astype(np.float64).copy()
         mujoco.mj_forward(self._model, self._data)
 
         self._cmd         = self._sample_cmd().astype(np.float32)
@@ -437,6 +455,7 @@ class HexapodEnv(gym.Env):
         policy_target  = gait_neutral + action * self.RESIDUAL_SCALE_MAX
         target = (scaffold_joints * self.gait_scale
                   + policy_target * (1.0 - self.gait_scale))
+        self._prev_ctrl = self._data.ctrl.copy()
         self._data.ctrl[:] = target
         # 2b. BC target — the action that, applied at gait_scale=0.0, would
         # produce the scaffold's joint targets exactly. Exposed in info for
@@ -817,11 +836,24 @@ class HexapodEnv(gym.Env):
         # inject IMU-only estimation noise instead.
         if self.stage == 4:
             body_linvel = np.zeros(3, dtype=np.float32)
+        if self._obs_variant == "hardware":
+            # Open-loop servos: commanded angle + its finite difference
+            # (mirrors hexapod_env_jax._get_obs).
+            joint_pos = self._data.ctrl
+            joint_vel = (self._data.ctrl - self._prev_ctrl) / self._dt
+        else:
+            joint_pos = qpos[7:25]
+            joint_vel = qvel[6:24]
+        if self._imu_available:
+            imu_quat, imu_gyro = qpos[3:7], qvel[3:6]           # JAX convention
+        else:
+            imu_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+            imu_gyro = np.zeros(3, dtype=np.float32)
         return compose_obs(
-            joint_pos       = qpos[7:25],
-            joint_vel       = qvel[6:24],
-            imu_quat        = qpos[3:7],                       # JAX convention
-            imu_gyro        = qvel[3:6],                       # JAX convention
+            joint_pos       = joint_pos,
+            joint_vel       = joint_vel,
+            imu_quat        = imu_quat,
+            imu_gyro        = imu_gyro,
             imu_accel       = np.zeros(3, dtype=np.float32),   # JAX convention
             scaffold_hint   = scaffold_hint,
             phase_sc        = np.array([math.sin(2 * math.pi * phase),
@@ -830,6 +862,7 @@ class HexapodEnv(gym.Env):
             cmd             = self._cmd,
             body_linvel     = body_linvel,
             concat_fn       = np.concatenate,
+            variant         = self._obs_variant,
         ).astype(np.float32)
 
     # ------------------------------------------------------------------

@@ -212,3 +212,73 @@ def test_mini_hexapod_generator_is_in_sync():
     for mjx, fname in ((True, MINI_MODELS[0]), (False, MINI_MODELS[1])):
         on_disk = (_PROJECT_ROOT / "models" / fname).read_text(encoding="utf-8")
         assert gen.build(mjx) == on_disk, f"{fname} is stale — run tools/gen_mini_hexapod_mjcf.py"
+
+
+# ---------------------------------------------------------------------------
+# Profile-driven env plumbing (2026-11-12): obs variants, stance envelope,
+# cmd bins and the gym env all follow the robot profile.
+# ---------------------------------------------------------------------------
+def test_obs_variants():
+    from envs.obs_layout import OBS_DIM, compose_obs, obs_dim
+    assert obs_dim("full") == OBS_DIM == 78
+    assert obs_dim("hardware") == 75
+    parts = dict(joint_pos=np.zeros(18), joint_vel=np.zeros(18), imu_quat=np.zeros(4),
+                 imu_gyro=np.zeros(3), imu_accel=np.zeros(3), scaffold_hint=np.zeros(18),
+                 phase_sc=np.zeros(2), cmd=np.zeros(9), body_linvel=np.ones(3))
+    assert compose_obs(**parts, concat_fn=np.concatenate, variant="full").shape == (78,)
+    hw = compose_obs(**parts, concat_fn=np.concatenate, variant="hardware")
+    assert hw.shape == (75,) and not np.any(hw == 1.0), "hardware obs must drop body_linvel"
+
+
+def test_stance_envelope_per_profile():
+    from envs.stance_envelope import PHANTOMX_ENVELOPE, envelope_for, safe_dw_range
+    from gait import MINI_HEXAPOD, PHANTOMX
+    assert envelope_for(PHANTOMX) == PHANTOMX_ENVELOPE
+    assert safe_dw_range(-0.025) == PHANTOMX_ENVELOPE.safe_dw_range(-0.025)
+    mini = envelope_for(MINI_HEXAPOD)
+    assert envelope_for("models/mini_hexapod_mjx.xml") == mini
+    assert mini.dh_min < 0.0 < mini.dh_max
+    assert len(mini.height_presets) == 5
+    for dh in mini.height_presets:
+        lo, hi = mini.safe_dw_range(dh)
+        assert lo < 0.0 < hi, (dh, lo, hi)
+        assert mini.dw_joint_min <= lo and hi <= mini.dw_joint_max + 1e-9
+
+
+def test_cmd_bins_per_profile():
+    import jax.numpy as jnp
+    from envs.cmd_bins import N_BINS, PHANTOMX_BIN_SPEC, bin_spec_for, cmd_to_bin
+    assert bin_spec_for("models/phantomx_simple_mjx.xml") is PHANTOMX_BIN_SPEC
+    spec = bin_spec_for("models/mini_hexapod_mjx.xml")
+    rng = np.random.default_rng(0)
+    cmds = rng.uniform([-0.08, -0.08, -0.6, 0, 0, -0.028, -0.04, 0, 0],
+                       [0.08, 0.08, 0.6, 0, 0, 0.032, 0.055, 0, 0], size=(5000, 9)).astype(np.float32)
+    bins = np.asarray(cmd_to_bin(jnp.asarray(cmds), spec))
+    assert bins.min() >= 0 and bins.max() < N_BINS
+    assert len(np.unique(bins)) > 0.8 * N_BINS, "mini cmd range should populate most bins"
+    # Default spec is PhantomX — identical to passing it explicitly.
+    assert np.array_equal(np.asarray(cmd_to_bin(jnp.asarray(cmds))),
+                          np.asarray(cmd_to_bin(jnp.asarray(cmds), PHANTOMX_BIN_SPEC)))
+
+
+@pytest.mark.parametrize("fname,variant,dim", [
+    ("mini_hexapod_mjx.xml", "hardware", 75),
+    ("phantomx_simple_mjx.xml", "full", 78),
+])
+def test_gym_env_follows_profile(mujoco_available, fname, variant, dim):
+    """Gym env (watch/eval/record path) reads spawn/termination/obs layout from the profile."""
+    pytest.importorskip("gymnasium")   # not installed in the WSL training venv
+    from envs.hexapod_env import HexapodEnv
+    env = HexapodEnv(model_path=str(_PROJECT_ROOT / "models" / fname), stage=3)
+    assert env.profile.obs_variant == variant
+    assert env.observation_space.shape == (dim,)
+    assert env.profile.min_body_z == env.MIN_Z and env.profile.ref_body_z == env.REF_BODY_Z
+    env.gait_scale = 1.0
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (dim,)
+    for _ in range(50):
+        obs, _, term, trunc, _ = env.step(np.zeros(18, dtype=np.float32))
+        assert not term and not trunc
+    if variant == "hardware":
+        np.testing.assert_allclose(obs[:18], env._data.ctrl, atol=1e-6)
+        np.testing.assert_allclose(obs[36:40], [1, 0, 0, 0])

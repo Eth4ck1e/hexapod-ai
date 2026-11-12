@@ -31,6 +31,7 @@ Run from PowerShell — it shells out to wsl for training itself.
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import shutil
 import subprocess
@@ -43,14 +44,36 @@ from pathlib import Path
 # values are also imported by watch_demo_jax.py so its defaults stay
 # in sync with what you're training.
 # ============================================================================
-BASE_NAME    = "mjx_stage1_foot_v1"
+# Robot selection (2026-11-12). Every script that imports MODEL_PATH /
+# RENDER_MODEL_PATH / BASE_NAME from here follows the active robot, so one
+# environment variable switches the whole pipeline:
+#   HEXAPOD_ROBOT=phantomx      (default)  — v27 lineage, 78-dim "full" obs
+#   HEXAPOD_ROBOT=mini_hexapod             — small bot, 75-dim "hardware" obs
+# chain_train forwards the variable into the WSL subprocesses it launches.
+ROBOT_SESSIONS = {
+    "phantomx": dict(
+        BASE_NAME="mjx_stage1_foot_v1",
+        MODEL_PATH="models/phantomx_simple_mjx.xml",
+        # Render model for watch scripts. Inference still uses MODEL_PATH;
+        # RENDER_MODEL_PATH is ONLY for the viewer window (mesh visuals).
+        RENDER_MODEL_PATH="models/phantomx.xml",
+    ),
+    "mini_hexapod": dict(
+        BASE_NAME="mini_stage1_foot_v1",
+        MODEL_PATH="models/mini_hexapod_mjx.xml",
+        RENDER_MODEL_PATH="models/mini_hexapod_simple.xml",   # no mesh model yet
+    ),
+}
+ROBOT = os.environ.get("HEXAPOD_ROBOT", "phantomx")
+if ROBOT not in ROBOT_SESSIONS:
+    raise SystemExit(f"HEXAPOD_ROBOT={ROBOT!r} unknown; choose from {sorted(ROBOT_SESSIONS)}")
+_S = ROBOT_SESSIONS[ROBOT]
+
+BASE_NAME    = _S["BASE_NAME"]
 CMD_MASK     = "stage1"          # stage1 | stage2 | stage3
 ACTION_SPACE = "foot"            # joint | foot
-MODEL_PATH   = "models/phantomx_simple_mjx.xml"
-# Default render model for watch scripts. Inference still uses MODEL_PATH;
-# RENDER_MODEL_PATH is ONLY for the viewer window (mesh visuals).
-# Set to MODEL_PATH for zero-overhead viewing.
-RENDER_MODEL_PATH = "models/phantomx.xml"
+MODEL_PATH   = _S["MODEL_PATH"]
+RENDER_MODEL_PATH = _S["RENDER_MODEL_PATH"]
 
 # VRAM-budget knobs (consumed by both train_jax_amp.py and pretrain_bc_jax.py).
 # 16 GB RTX 5060 Ti VRAM was tight during the v24-v25 era with 114-dim obs +
@@ -77,6 +100,22 @@ BC_OUT_DIR     = CHECKPOINT_DIR / "bc_pretrained_jax"
 # enable_jax_cache() right after `import jax`, before any JAX operation
 # runs. Stale caches are auto-invalidated by JAX when traced code changes.
 JAX_CACHE_DIR = str(PROJECT_ROOT / ".cache" / "jax_hexapod")
+
+
+def wsl_project_root() -> str:
+    """PROJECT_ROOT as seen from inside WSL (C:\\x\\y → /mnt/c/x/y). On a
+    non-Windows host it's just the POSIX path."""
+    if platform.system() != "Windows":
+        return PROJECT_ROOT.as_posix()
+    drive = PROJECT_ROOT.drive.rstrip(":").lower()
+    rest = PROJECT_ROOT.as_posix()[len(PROJECT_ROOT.drive):]
+    return f"/mnt/{drive}{rest}"
+
+
+def _wsl_prefix() -> str:
+    """`cd` into the project + env vars every launched stage needs."""
+    return (f"cd '{wsl_project_root()}' && "
+            f"HEXAPOD_ROBOT={ROBOT} PYTHONPATH=. ~/.venv-mjx/bin/python -u ")
 
 
 def enable_jax_cache(cache_dir: str = JAX_CACHE_DIR) -> None:
@@ -199,8 +238,7 @@ def archive_old_logs(prefix: str) -> int:
 def run_pretrain(cmd_mask: str, action_space: str) -> int:
     """Invoke pretrain_bc_jax.py via WSL. Returns the exit code."""
     cmd_inner = (
-        f"cd '/mnt/c/Users/Eth4ck1e/OneDrive/Documents/Hexapod AI Project' && "
-        f"PYTHONPATH=. ~/.venv-mjx/bin/python scripts/pretrain_bc_jax.py "
+        _wsl_prefix() + "scripts/pretrain_bc_jax.py "
         f"--cmd-mask {cmd_mask} "
         f"--action-space {action_space}"
     )
@@ -231,8 +269,7 @@ def run_one_segment(restore_path: Path, run_name: str,
         if amp_priors is None:
             raise ValueError("amp=True requires amp_priors path")
         cmd_inner = (
-            f"cd '/mnt/c/Users/Eth4ck1e/OneDrive/Documents/Hexapod AI Project' && "
-            f"PYTHONPATH=. ~/.venv-mjx/bin/python scripts/train_jax_amp.py "
+            _wsl_prefix() + "scripts/train_jax_amp.py "
             f"--restore {rel_restore} "
             f"--priors {amp_priors} "
             f"--segments {amp_segments} "
@@ -244,8 +281,7 @@ def run_one_segment(restore_path: Path, run_name: str,
         )
     else:
         cmd_inner = (
-            f"cd '/mnt/c/Users/Eth4ck1e/OneDrive/Documents/Hexapod AI Project' && "
-            f"PYTHONPATH=. ~/.venv-mjx/bin/python scripts/train_jax.py "
+            _wsl_prefix() + "scripts/train_jax.py "
             f"--restore {rel_restore} "
             f"--steps {steps} "
             f"--num-envs {num_envs} "

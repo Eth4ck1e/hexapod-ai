@@ -30,7 +30,7 @@ from amp.discriminator import (
     style_reward,
 )
 from envs import hexapod_env_jax as hex_jax
-from envs.cmd_bins import N_BINS, cmd_to_bin
+from envs.cmd_bins import N_BINS, bin_spec_for, cmd_to_bin
 from envs.hexapod_brax_env import (
     HexapodBraxEnv,
     _initial_brax_state,
@@ -104,6 +104,7 @@ class HexapodAMPEnv(HexapodBraxEnv):
                          disturbance_magnitude_scale=disturbance_magnitude_scale)
         self._disc_params = discriminator_params
         self._multihead = bool(multihead_disc)
+        self._bin_spec = bin_spec_for(model_path)   # robot-specific bin edges
         if multihead_disc:
             self._disc_module = MultiHeadDiscriminator(
                 n_bins=N_BINS, hidden_sizes=discriminator_hidden)
@@ -145,7 +146,7 @@ class HexapodAMPEnv(HexapodBraxEnv):
         ])                                                        # (101,)
         # style_reward expects a batched input — wrap, take [0].
         if self._multihead:
-            bin_idx = cmd_to_bin(cmd_pre)[None]   # (1,)
+            bin_idx = cmd_to_bin(cmd_pre, self._bin_spec)[None]   # (1,)
             style_r = multihead_style_reward(self._disc_params,
                                               self._disc_module,
                                               transition[None, :],

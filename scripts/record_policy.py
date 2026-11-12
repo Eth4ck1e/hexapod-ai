@@ -43,6 +43,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE
 from chain_train import MODEL_PATH as CHAIN_MODEL_PATH
+from chain_train import RENDER_MODEL_PATH as CHAIN_RENDER_MODEL_PATH
 from chain_train import enable_jax_cache
 
 enable_jax_cache()
@@ -106,7 +107,7 @@ def main():
                    choices=["joint", "foot"])
     p.add_argument("--model", default=CHAIN_MODEL_PATH,
                    help="MJCF for inference / physics. Default: simple model.")
-    p.add_argument("--render-model", default="models/phantomx.xml",
+    p.add_argument("--render-model", default=CHAIN_RENDER_MODEL_PATH,
                    help="MJCF rendered into the video. Default: mesh model "
                         "for photo-realistic output. Set same as --model if "
                         "you want the simple primitive look.")

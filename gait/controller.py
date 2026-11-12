@@ -600,8 +600,10 @@ class Controller:
         # Determine motion regime: arc-aware or superposition.
         # Arc mode requires both translation AND rotation, with an implied
         # turning radius R = speed / |wz| within the operational range.
+        # Profiles trained with the JAX controller (no arc mode) disable it
+        # here so eval / watch use the scaffold the policy actually saw.
         arc_mode = False
-        if speed > 1e-9 and abs(wz) > 1e-9:
+        if self.profile.arc_turning and speed > 1e-9 and abs(wz) > 1e-9:
             R = speed / abs(wz)
             if self.MIN_TURN_RADIUS < R < self.MAX_TURN_RADIUS:
                 arc_mode = True
