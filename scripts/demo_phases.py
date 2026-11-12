@@ -143,20 +143,27 @@ def _arc(ctrl, speed_frac, R_frac, sign_wz):
 # envs/stance_envelope.py — same numbers used by the env's cmd sampler
 # during training, so watch tests automatically reflect any envelope
 # change without manual sync.
-from envs.stance_envelope import HEIGHT_PRESETS, safe_dw_range
+from envs.stance_envelope import HEIGHT_PRESETS, envelope_for, safe_dw_range  # noqa: F401 (legacy re-exports)
+
+
+def _env(c):
+    """Stance envelope of the controller's robot (PhantomX or mini) so the
+    demo never commands a height/width the robot was not trained on."""
+    return envelope_for(c.profile)
 
 
 def _height_cycle(t, c):
     """20s cycle: 4s at each of the 5 height presets, dw=0 throughout."""
-    phase = int(t / 4.0) % len(HEIGHT_PRESETS)
-    h = HEIGHT_PRESETS[phase]
+    presets = _env(c).height_presets
+    phase = int(t / 4.0) % len(presets)
+    h = presets[phase]
     return _walk(c, 0) + _cmd(height=h)
 
 
 def _width_cycle(t, c):
     """20s cycle at neutral height (dh=0): step through dw extremes.
     Min/max widths come from the dh-conditional envelope at dh=0."""
-    min_dw, max_dw = safe_dw_range(0.0)
+    min_dw, max_dw = _env(c).safe_dw_range(0.0)
     phase = int(t / 4.0) % 5
     w = [0.0, max_dw, 0.0, min_dw, 0.0][phase]
     return _walk(c, 0) + _cmd(width=w)
@@ -166,9 +173,10 @@ def _stance_combined(t, c):
     """40s cycle: walk forward through corners — at each of the 5 height
     presets, alternate widest-allowed and narrowest-allowed for that height
     (4s per corner). Demonstrates the full dh-conditional envelope."""
-    phase = int(t / 4.0) % (2 * len(HEIGHT_PRESETS))
-    h = HEIGHT_PRESETS[phase // 2]
-    min_dw, max_dw = safe_dw_range(h)
+    presets = _env(c).height_presets
+    phase = int(t / 4.0) % (2 * len(presets))
+    h = presets[phase // 2]
+    min_dw, max_dw = _env(c).safe_dw_range(h)
     w = max_dw if (phase % 2 == 0) else min_dw
     return _walk(c, 0) + _cmd(height=h, width=w)
 
