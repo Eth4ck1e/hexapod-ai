@@ -662,7 +662,11 @@ class HexapodEnv(gym.Env):
         vx, vy, _    = self._body_frame_linvel()
         wz           = float(self._data.qvel[5])
         pitch, roll  = self._body_pitch_roll()
-        height_delta = float(self._data.qpos[2]) - self.REF_BODY_Z
+        # cmd[5] convention: POSITIVE = body lowered (squat). Body z therefore
+        # moves opposite to dh, so the measured delta is negated before the
+        # comparison. (Was un-negated until 2026-11-12: any non-zero height cmd
+        # looked like a 2·|dh| error and zeroed the tracking reward.)
+        height_delta = -(float(self._data.qpos[2]) - self.REF_BODY_Z)
         actual = np.array([vx, vy, wz, pitch, roll, height_delta, 0.0, 0.0, 0.0],
                           dtype=np.float64)
 
