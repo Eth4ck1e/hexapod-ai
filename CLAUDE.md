@@ -64,11 +64,11 @@ change anything in one of these areas, edit ONLY the owning module.**
 
 | Module | Owns | Consumers |
 |---|---|---|
-| `envs/obs_layout.py` | Policy observation schema (78 dims as of v26+, was 114 in v24-v25) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
-| `envs/stance_envelope.py` | Stance height + dh-conditional width envelope | JAX env cmd sampler, watch_scaffold interactive presets, demo_phases watch tests |
-| `envs/cmd_bins.py` | 150-bin partition (motion × height × width) | JAX env disc routing, prior_data binning, multi-head disc, train_jax_amp |
-| `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `NUM_ENVS`, `DISC_BATCH` | train_jax_amp, pretrain_bc_jax, watch_demo_jax, watch_controller |
-| **`gait/robot_profile.py`** (2026-11-03) | Per-robot `RobotProfile`: leg mount geometry, link lengths, IK anchor pose, joint signs, gait defaults, speed ladder, owned MJCF filenames. `PHANTOMX` is the default. | `gait/controller.py`, `gait/controller_jax.py` (both robot-agnostic now); everything downstream via `Controller(model_path)` |
+| `envs/obs_layout.py` | Policy observation schema. Two variants selected by `RobotProfile.obs_variant`: `"full"` 78 dims (PhantomX, v26+) and `"hardware"` 75 dims (commanded joint angle + Δ/dt, IMU slots constant when `imu_available=False`, no body linvel — mini hexapod) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
+| `envs/stance_envelope.py` | `StanceEnvelope` + `envelope_for(profile\|model_path)`. The NUMBERS live in `RobotProfile` (PhantomX verified by eye; mini from `tools/derive_stance_envelope.py`); module constants are PhantomX aliases | JAX env (via `EnvParams.dw_envelope`), cmd_bins, watch_scaffold presets, demo_phases watch tests |
+| `envs/cmd_bins.py` | 150-bin partition (motion × height × width). `BinSpec` per robot via `bin_spec_for(model_path)`; every classifier defaults to the frozen PhantomX spec so v23–v27 bins/priors are unchanged | AMP env disc routing, prior_data binning, multi-head disc, train_jax_amp |
+| `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `NUM_ENVS`, `DISC_BATCH`. **`HEXAPOD_ROBOT=phantomx\|mini_hexapod`** (env var, default phantomx) picks the robot session; forwarded into WSL launches | train_jax_amp, pretrain_bc_jax, prior_data, watch_demo_jax, watch_controller, record_policy |
+| **`gait/robot_profile.py`** (2026-11-03, extended 2026-11-12) | Per-robot `RobotProfile`: leg mount geometry, link lengths, IK anchor pose, joint signs, gait defaults, speed ladder, owned MJCF filenames, **stance envelope, env scales (spawn_z, ref_body_z, min_body_z, motor/foot limits, foot_contact_z, height/width dev, foot residual authority), `arc_turning`, `obs_variant`, `imu_available`**. `PHANTOMX` is the default. | `gait/controller.py`, `gait/controller_jax.py`, **`envs/hexapod_env_jax.py:make_env_params`, `envs/hexapod_env.py`**, stance_envelope, cmd_bins — all via `Controller(model_path).profile` |
 
 If you find yourself manually syncing the same constant or formula
 between two files, **that's a signal to extract it to a SoT module**.
@@ -186,7 +186,9 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 
 - **Gait IK is closed-form and vectorized**. Sub-mm round-trip accuracy validated against MJCF FK. See `docs/kinematics.md`.
 - **Robot-profile refactor (2026-11-03) is bit-equivalent for PhantomX.** Verified: 2000 random cmds × 3 MJCFs × 2 speed levels, numpy old-vs-new error exactly 0.0; JAX old-vs-new 1e-15 rad. Snapshots in `snapshots/*_pre_robot_profile.py`.
-- **Known gap: JAX controller has no arc-turning mode.** `gait/controller.py` (eval/watch) switches to arc-aware foot paths when `MIN_TURN_RADIUS < speed/|wz| < MAX_TURN_RADIUS`; `gait/controller_jax.py` (training) always uses translate+spin superposition. ~27% of random combined translate+turn cmds hit the window, with up to 0.29 rad / 13 mm scaffold difference. `python gait/controller_jax.py` parity therefore reports MISMATCH — pre-existing, not a regression. Either port arc mode to JAX or disable it in numpy for eval; decide before mini-hexapod training.
+- **JAX controller has no arc-turning mode; gated per profile (2026-11-12).** `gait/controller.py` (eval/watch) switches to arc-aware foot paths when `MIN_TURN_RADIUS < speed/|wz| < MAX_TURN_RADIUS` only if `profile.arc_turning`; `gait/controller_jax.py` (training) always uses translate+spin superposition. PhantomX keeps `arc_turning=True` (legacy checkpoints/priors), so `python gait/controller_jax.py` parity still reports MISMATCH there — pre-existing. The mini profile sets `arc_turning=False`, so its eval scaffold equals its training scaffold.
+- **Env refactor to profiles (2026-11-12) verified with `tools/check_env_profile_parity.py`** (run in WSL): PhantomX old-vs-new `EnvParams` identical, reset obs + first steps bit-identical, later steps within GPU run-to-run noise. **The GPU MJX step is NOT bitwise deterministic run-to-run** (~1e-5 obs drift after ~20 steps) — never assert exact equality across GPU rollouts.
+- **`EnvParams` must stay jit-argument-safe.** Several tools pass params through `jax.jit` as an argument, so no raw str/bool config fields: static switches go in `ObsConfig`, a leaf-less registered pytree (travels as aux data).
 - **Per-joint sign conventions**: coxa always +1; femur +1 right / -1 left; tibia -1 right / +1 left. Don't "simplify" by negating all three for left legs — breaks the math.
 - **Foot tip is empirical**: tibia-local `(0.134, 0.031, 0.0)`. The simple models replicate this with a foot sphere geom at the same position.
 - **Foot z is normalized to uniform plane in body frame** (v21+). `gait/controller.py:calibrate()` sets `LEG_ORIGIN_BODY[:, 2] = mean(z)` so all 6 feet sit at exactly -145.99 mm in body frame. Fixes a 3mm asymmetry from MJCF coxa mount differences.
@@ -211,7 +213,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 |------|---------|
 | `scripts/train_jax_amp.py` | Brax PPO + AMP training. `--partition-disc`, `--knn-k`, `--style-weight`, `--recovery-curriculum` (shelved). |
 | `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
-| `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). |
+| `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). Robot via `HEXAPOD_ROBOT`. |
+| `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
 | `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
 | `scripts/watch_controller.py` | 8BitDo / Xbox controller-driven inference. Falls back to watch_demo_jax `--interactive` if no controller. |
 | `scripts/record_policy.py` | Offscreen MP4 render of policy + tracking + orbit camera. |
@@ -260,6 +263,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | Path | Purpose |
 |------|---------|
 | `tools/gen_mini_hexapod_mjcf.py` | One dimension/mass/servo table → both mini-hexapod MJCFs. Edit DIMS / MASS / SERVO here, rerun, commit the XMLs. Every PLACEHOLDER is marked. |
+| `tools/derive_stance_envelope.py` | Kinematic (dh, dw) feasibility sweep for any profile → the linear envelope fields for `RobotProfile`. Produced the mini numbers; rerun after the bot is measured. Conservative vs the eye-verified PhantomX envelope. |
+| `tools/check_env_profile_parity.py` | PhantomX old-vs-snapshot env parity + mini env smoke (75-dim obs, scaffold survives, bins populated, Brax obs size). Needs MJX → run in WSL. |
 | `tools/watch_scaffold.py` | Render scaffold gait directly via `Controller.predict()`. `--interactive` mode for stance tuning (keys 1-6). Uses `envs/stance_envelope.py` for height presets. |
 | `tools/analyze_cmd_distances.py` | Diagnostic: K-NN structure of priors in cmd space. Was used to design the 150-bin partition. |
 | `tools/to_parallel_sweep.py` | TO sweep harness — parallel solve of many cost-weight / gait-param variations. |
@@ -391,21 +396,36 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
 - **Firmware**: `mini_hexapod/firmware/arduino/` — stages 01–05 +
   `hexapod_firmware.ino` (menu: geometry/trim/sign/IK/walk/BT stub/export,
   persists to NVS).
-- **Sim/obs plan**: policy obs for this bot drops `body_linvel`, feeds
+- **Obs (implemented 2026-11-12)**: `obs_variant="hardware"` (75 dims) —
   COMMANDED joint angle as `joint_pos` (servos are open-loop) with
-  finite-difference `joint_vel`, keeps IMU quat+gyro. Train with IMU noise
-  + latency. Int8 MLP (256,128,64) ≈ 60 KB fits the C3.
+  finite-difference `joint_vel`, IMU quat/gyro slots held at identity/zero
+  because **`imu_available=False`** (no IMU fitted; user may not have time
+  to add one before the class presentation). Without an IMU the policy is
+  a learned feed-forward refinement of the scaffold: it sees only
+  (cmd, phase, scaffold hint, its own commands) and cannot react to
+  disturbances — say so honestly when presenting. Flip `imu_available=True`
+  (and retrain) once an MPU6050 + filter exists. Int8 MLP (256,128,64)
+  ≈ 60 KB fits the C3.
+- **Firmware NVS reality check**: `hexapod_firmware.ino` persists geometry,
+  per-joint trim µs, per-joint sign and gait params — **not per-joint travel
+  limits**. A range-calibration mode (jog to each stop, store min/max µs,
+  JSON export) must be added before the bot visit so joint limits can be
+  measured in one session.
 - **Plan**: (1) ✅ robot-profile refactor of gait lib; (2) ✅ mini MJCF
   draft + `MINI_HEXAPOD` profile (placeholders flagged; IK round-trip exact,
-  stands + walks under physics at ≤44% of stall torque); (3) make the JAX
-  env read robot params from the profile (spawn_z, ref_body_z, min_z, motor
-  limits, foot radius — currently hardcoded PhantomX values in
-  `EnvParams`) + hardware-realistic obs variant; (4) firmware IMU +
-  inference skeleton; (5) when measured: finalize MJCF, re-derive
-  limits/envelope/speed, priors, BC, AMP.
-- **Also PhantomX-specific and not yet profile-driven**: `envs/stance_envelope.py`
-  (dh/dw envelope measured on PhantomX), `envs/cmd_bins.py` bin edges,
-  `FULL_*_DEV` error scales in `make_env_params`. Each needs a mini variant.
+  stands + walks under physics at ≤44% of stall torque); (3) ✅ JAX + gym
+  env read everything from the profile; stance envelope + cmd bins per
+  robot; hardware obs variant; `HEXAPOD_ROBOT` session switch; (3b) ⏳
+  **first mini pipeline run** `amp_to_mini_hexapod_v1` (priors → BC → AMP,
+  launched 2026-11-12 via `scripts/run_pipeline.sh` on placeholder
+  geometry — validates the pipeline + yields a demo video; expect to rerun
+  after measurement); (4) firmware range-calibration mode + int8 inference
+  skeleton (IMU optional); (5) when measured: finalize MJCF, re-derive
+  limits/envelope/speed, rerun the pipeline, deploy.
+- **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
+  pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
+  has not been run for the mini (`speed_levels={}` → single default speed,
+  MAX_SPEED 0.075 m/s).
 - **Workstation note**: WSL was reinstalled 2026-07-21; `~/.venv-mjx` was
   rebuilt 2026-11-03 (jax[cuda12] 0.10, mujoco/mjx 3.7.0, brax 0.14.2).
 
