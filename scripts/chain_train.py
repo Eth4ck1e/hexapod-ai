@@ -64,7 +64,7 @@ ROBOT_SESSIONS = {
         RENDER_MODEL_PATH="models/mini_hexapod_simple.xml",   # no mesh model yet
     ),
 }
-ROBOT = os.environ.get("HEXAPOD_ROBOT", "phantomx")
+ROBOT = os.environ.get("HEXAPOD_ROBOT", "phantomx").strip() or "phantomx"   # cmd.exe `set X=v &&` keeps a trailing space
 if ROBOT not in ROBOT_SESSIONS:
     raise SystemExit(f"HEXAPOD_ROBOT={ROBOT!r} unknown; choose from {sorted(ROBOT_SESSIONS)}")
 _S = ROBOT_SESSIONS[ROBOT]

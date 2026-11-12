@@ -259,7 +259,7 @@ def main() -> None:
         source = GamepadSource(ctrl, args.calibration)
 
     link = Link(args.port, args.baud, args.dry_run)
-    csv_f = open(args.log_csv, "w") if args.log_csv else None
+    csv_f = open(args.log_csv, "w") if args.log_csv else None   # noqa: SIM115 — closed in finally
     if csv_f:
         csv_f.write("t," + ",".join(f"cmd{i}" for i in range(9)) + ","
                     + ",".join(f"{n}_{j}" for n in LEG_ORDER for j in ("coxa", "femur", "tibia")) + "\n")
