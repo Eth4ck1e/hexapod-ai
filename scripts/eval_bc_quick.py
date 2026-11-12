@@ -36,8 +36,6 @@ from chain_train import (
 from chain_train import (
     MODEL_PATH as CHAIN_MODEL_PATH,
 )
-from watch_demo_jax import _patch_obs_to_jax
-
 from envs.hexapod_env import HexapodEnv
 
 
@@ -75,7 +73,7 @@ def main():
 
     env = HexapodEnv(stage=args.stage, model_path=args.model)
     env.gait_scale = args.gait_scale
-    _patch_obs_to_jax(env)
+    # obs: envs/hexapod_env.py emits the JAX-convention, profile-aware layout itself.
     # Source foot_residual_scale from the JAX env's params so it tracks any
     # env-side changes automatically (no separate flag to keep in sync).
     if args.action_space == "foot":
