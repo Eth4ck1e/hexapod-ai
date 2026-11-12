@@ -90,7 +90,7 @@ def main():
     env.TILT_DEV_LIMIT = math.pi
     env.NO_PROGRESS_GRACE = 1_000_000_000
 
-    from scripts.pretrain_bc_jax import POLICY_HIDDEN_LAYERS   # (256, 128, 64) since v11
+    from scripts.pretrain_bc_jax import POLICY_HIDDEN_LAYERS  # (256, 128, 64) since v11
     nets = make_ppo_networks(observation_size=env.observation_space.shape[0],
                              action_size=env.action_space.shape[0],
                              preprocess_observations_fn=running_statistics.normalize,
