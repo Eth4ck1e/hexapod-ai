@@ -285,7 +285,9 @@ def main() -> None:
             if infer is None:
                 target = np.asarray(scaffold_joints, dtype=np.float32)
             else:
-                action = np.clip(infer(obs), -1.0, 1.0)
+                # Brax PPO's NormalTanhDistribution: deterministic action = tanh(mean),
+                # which is what the env saw during training.
+                action = np.tanh(infer(obs))
                 feet_target = feet_t + action.reshape(6, 3) * residual_scale
                 target = np.asarray(ctrl.body_to_joints(feet_target), dtype=np.float32)
 

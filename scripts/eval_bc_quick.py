@@ -36,6 +36,7 @@ from chain_train import (
 from chain_train import (
     MODEL_PATH as CHAIN_MODEL_PATH,
 )
+
 from envs.hexapod_env import HexapodEnv
 
 
@@ -89,9 +90,11 @@ def main():
     env.TILT_DEV_LIMIT = math.pi
     env.NO_PROGRESS_GRACE = 1_000_000_000
 
+    from scripts.pretrain_bc_jax import POLICY_HIDDEN_LAYERS   # (256, 128, 64) since v11
     nets = make_ppo_networks(observation_size=env.observation_space.shape[0],
                              action_size=env.action_space.shape[0],
-                             preprocess_observations_fn=running_statistics.normalize)
+                             preprocess_observations_fn=running_statistics.normalize,
+                             policy_hidden_layer_sizes=POLICY_HIDDEN_LAYERS)
     @jax.jit
     def infer(obs):
         # Brax PPO's NormalTanhDistribution wraps the network mean with
