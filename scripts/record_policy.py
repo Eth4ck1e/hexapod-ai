@@ -138,7 +138,6 @@ def main():
     # --- Env (no live viewer) ---
     env = HexapodEnv(stage=3, render_mode=None, model_path=args.model)
     env.gait_scale = 0.0
-    _patched_obs(env)
     obs, _ = env.reset()
 
     obs_size = env.observation_space.shape[0]
