@@ -26,12 +26,10 @@ with 4× downsample = 50 frames/sec sim-time which equals real-time).
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import pickle
 import sys
 import time
-import types
 from pathlib import Path
 
 import imageio
@@ -59,24 +57,10 @@ from demo_phases import (
 
 from envs.hexapod_env import HexapodEnv
 
-
-def _patched_obs(env: HexapodEnv) -> None:
-    """JAX-style obs (matches watch_demo_jax / watch_controller)."""
-    def _get_obs(self):
-        qpos = self._data.qpos
-        qvel = self._data.qvel
-        scaffold_hint = self._latest_feet_body.flatten()
-        phase = self._ctrl.get_phase(self._sim_time)
-        body_linvel = np.asarray(self._body_frame_linvel(), dtype=np.float32)
-        if self.stage == 4:
-            body_linvel = np.zeros(3, dtype=np.float32)
-        return np.concatenate([
-            qpos[7:], qvel[6:], qpos[3:7], qvel[3:6], np.zeros(3, dtype=np.float32),
-            scaffold_hint,
-            [math.sin(2*math.pi*phase), math.cos(2*math.pi*phase)],
-            self._cmd, body_linvel,
-        ]).astype(np.float32)
-    env._get_obs = types.MethodType(_get_obs, env)
+    # Obs come from envs/hexapod_env.py:_get_obs, which already emits the
+    # JAX-convention layout through envs/obs_layout.py and follows the robot
+    # profile's obs variant (78-dim "full" for PhantomX, 75-dim "hardware"
+    # for the mini). The old 78-dim monkeypatch here broke non-PhantomX robots.
 
 
 def _build_inference(obs_size, act_size, deterministic=True):
