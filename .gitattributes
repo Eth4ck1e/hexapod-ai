@@ -1,0 +1,2 @@
+# Shell scripts run inside WSL from a Windows checkout — keep LF.
+*.sh text eol=lf
