@@ -145,6 +145,10 @@ class RobotProfile:
     # See envs/obs_layout.py.
     obs_variant: str = "full"
     imu_available: bool = True
+    # --- rendering ---------------------------------------------------------
+    # Default orbit-camera distance for scripts/record_policy.py (m); the
+    # PhantomX value is the historical default, the mini is ~1/3 the size.
+    camera_distance: float = 1.5
 
     def __post_init__(self):
         # Normalise array fields so callers can pass lists.
@@ -317,6 +321,7 @@ MINI_HEXAPOD = RobotProfile(
     # Deployment reality: open-loop servos, IMU not fitted yet.
     obs_variant="hardware",
     imu_available=False,
+    camera_distance=0.45,
 )
 
 

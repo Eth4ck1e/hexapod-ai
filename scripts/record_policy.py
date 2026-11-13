@@ -107,8 +107,9 @@ def main():
                    help="output video framerate (default 50)")
     p.add_argument("--duration", type=float, default=None,
                    help="seconds to record. Default: one full demo loop.")
-    p.add_argument("--track-distance", type=float, default=1.5,
-                   help="camera distance from bot (default 1.5m).")
+    p.add_argument("--track-distance", type=float, default=None,
+                   help="camera distance from bot (default: the robot profile's "
+                        "camera_distance — 1.5 m PhantomX, 0.45 m mini).")
     p.add_argument("--track-elevation", type=float, default=-25.0,
                    help="camera elevation angle in degrees, negative = "
                         "looking down (default -25°).")
@@ -181,6 +182,9 @@ def main():
     renderer = mujoco.Renderer(render_mjmodel, height=args.height, width=args.width)
     camera = mujoco.MjvCamera()
     camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+    if args.track_distance is None:
+        from gait.robot_profile import profile_for_model
+        args.track_distance = profile_for_model(args.render_model).camera_distance
     camera.distance  = args.track_distance
     camera.elevation = args.track_elevation
     camera.azimuth   = args.track_azimuth
