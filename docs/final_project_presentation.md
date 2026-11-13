@@ -50,7 +50,8 @@ corresponding run; everything else is already true today.
 | Mini v1 eval reward | +2222 → +2302 (iter 3) → +2298 (iter 10), max ≈ 2500 | plot |
 | Tracking vs scaffold (stage 1 / 2) | 0.95 / 0.89 policy vs 0.96 / 0.93 scaffold, 0 falls | `eval_bc_quick.py` |
 | Dynamics DR run (v1dr) | continued v1 for 9 × 50M steps under full DR: eval +2278 → +2296 → +2289 (flat, same level as nominal) | `media/plots/training_curves_mini_v1_v1dr.png` |
-| Robustness (512 paired episodes × 1000 steps, falls %) | dr 0: scaffold 0 / v1 0 / v1dr 0 · dr 1.0: 0 / 0 / 0 · dr 1.5 (friction 0.25–1.45×, servo 0.4–1.45×, chassis mass 0.7–1.9×): 0.2 / 0.2 / 0.2; any-termination 3.5 / 3.3 / 3.1 % | `media/plots/dr_robustness_mini.csv` |
+| v2h (final recipe: 50 Hz servo hold + DR, from scratch) | priors 73 s, BC 2.5 min, 10 × 50M PPO in 67 min; eval +2208 → +2288 → +2276; this is the policy for the bot | `media/plots/training_curves_mini_all.png` |
+| Robustness (512 paired episodes × 1000 steps, falls %) | scaffold / v1 / v1dr / v2h — dr 0: 0 / 0 / 0 / 0 · dr 1.0: 0 / 0 / 0 / 0 · dr 1.5 (friction 0.25–1.45×, servo 0.4–1.45×, chassis mass 0.7–1.9×): 0.2 / 0.2 / 0.2 / 0.0; any-termination at 1.5×: 3.5 / 3.5 / 3.1 / 3.5 % | `media/plots/dr_robustness_mini_hold.csv` |
 | Real-bot result | `TODO` (scaffold-only first, then policy) | demo log CSV |
 
 ## 4. Demo runbook (live)
@@ -69,7 +70,7 @@ On stage, in this order (each step is a fallback for the next):
 1. **Firmware walk** (`w` in the menu) — proves the hardware. Zero software risk.
 2. **Scaffold over serial** — `drive_serial.py --port … --source hold --cmd 0.04 0 0`
    (no `--params`). Proves the tether + kinematics convention.
-3. **Policy over serial** — add `--params checkpoints/amp_to_mini_hexapod_<final>/iter10/final/params.pkl`,
+3. **Policy over serial** — add `--params checkpoints/amp_to_mini_hexapod_v2h/iter10/final/params.pkl`,
    `--source gamepad` if the 8BitDo is paired, else `--source demo`.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
@@ -82,6 +83,6 @@ like "the same gait, a little smoother / more robust", not a new gait.
 
 | When | What |
 |---|---|
-| now → bot visit | DR run (`v1dr`), robustness table, videos, slides draft |
+| now → bot visit | ✅ DR run, ✅ servo-hold run (`v2h`), ✅ robustness table, ✅ sim videos; slides draft |
 | bot visit (late Nov) | flash v0.2 → `L` limits for 18 joints → `J` export → `tools/import_mini_calibration.py` → measure coxa offset + masses → regenerate MJCF → rerun pipeline (≈1 h GPU + priors/BC) → scaffold-over-serial test → policy-over-serial test, record phone video |
 | last week | final videos, rehearse runbook, charge batteries, print the fallback plan |

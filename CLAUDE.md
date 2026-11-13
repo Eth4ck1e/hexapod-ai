@@ -468,9 +468,18 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   (PhantomX 1, mini 4) — the PCA9685 emits 50 Hz PWM, so the real servos only
   latch a new target every 20 ms; both envs now hold `ctrl` for 4 sim steps
   (`DynConfig.ctrl_hold_steps`, static; PhantomX graph bit-identical) and
-  `drive_serial.py` feeds the policy the last SENT target. First run with it
-  (+ DR, + per-segment processes): `amp_to_mini_hexapod_v2h`, full pipeline
-  (priors → BC → 10 × 50M), launched 2026-11-12 ~20:10;
+  `drive_serial.py` feeds the policy the last SENT target. ✅ First run with it
+  (+ DR, + per-segment processes): **`amp_to_mini_hexapod_v2h`**, full pipeline
+  (priors 73 s → BC 2.5 min → 10 × 50M in 67 min, every stage its own
+  process; per-stage peak host RSS 2.5 / 4.2 GB, segments 5.2 GB with three
+  transient compile peaks at 9.2–9.7 GB — keep `MEM_BUDGET_MB` ≥ 10000). JAX
+  [EVAL] +2208 → +2288 (iter5) → +2276 (iter10). `eval_dr_robustness` under
+  the hold sim (512 eps): scaffold / v1 / v1dr / v2h falls 0/0/0/0 % at dr 0
+  and 1.0, 0.2/0.2/0.2/0.0 % at 1.5 — all equivalent.
+  **Deploy candidate: `amp_to_mini_hexapod_v2h/iter10/final/params.pkl`**
+  (trained with the hold the real bot has; copied to the Mac). Videos:
+  `media/recordings/mini_v1dr_iter9_showcase.mp4`, `mini_v2h_iter10_showcase.mp4`;
+  curves `media/plots/training_curves_mini_all.png`;
   (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
   re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
