@@ -27,7 +27,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "scripts"))   # watch_demo_jax imports chain_train bare
+sys.path.insert(0, str(_ROOT / "scripts"))   # pretrain_bc_jax imports chain_train bare
 
 import jax
 import jax.numpy as jnp
@@ -42,6 +42,24 @@ def load_policy(path: str):
     normalizer, policy = loaded[0], loaded[1]
     obs_dim = int(jax.tree_util.tree_leaves(normalizer)[0].shape[-1])
     return normalizer, policy, obs_dim
+
+
+def build_infer(norm, pol, obs_dim: int):
+    """obs batch -> deterministic action batch (tanh of the policy mean, Brax mode()).
+    Built here rather than via scripts/watch_demo_jax so the tool runs in the
+    WSL training venv (watch_demo_jax imports the gym env → gymnasium)."""
+    from brax.training.acme import running_statistics
+    from brax.training.agents.ppo.networks import make_ppo_networks
+    from pretrain_bc_jax import POLICY_HIDDEN_LAYERS
+    networks = make_ppo_networks(
+        observation_size=obs_dim, action_size=18,
+        preprocess_observations_fn=running_statistics.normalize,
+        policy_hidden_layer_sizes=POLICY_HIDDEN_LAYERS)
+
+    def infer(obs):
+        out = networks.policy_network.apply(norm, pol, obs)
+        return jnp.tanh(out[..., :18])
+    return infer
 
 
 def rollout_fn(params: hx.EnvParams, n_steps: int, infer):
@@ -96,12 +114,8 @@ def main() -> None:
         name, _, path = spec.partition("=")
         if not path:
             name, path = Path(spec).parts[-4] if len(Path(spec).parts) >= 4 else spec, spec
-        from watch_demo_jax import (
-            _build_inference_fn,  # needs brax; lazy so scaffold-only runs anywhere
-        )
         norm, pol, obs_dim = load_policy(path)
-        raw = _build_inference_fn(obs_dim, 18, deterministic=True)
-        infer = (lambda norm, pol, raw: (lambda obs: jnp.tanh(raw(norm, pol, obs, None))))(norm, pol, raw)
+        infer = build_infer(norm, pol, obs_dim)
         policies.append((name, infer))
         print(f"loaded {name}: {path} (obs {obs_dim})")
 
