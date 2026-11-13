@@ -16,6 +16,16 @@
 #   STYLE_WEIGHT    λ_style                            (default 1.0)
 #   PY              python interpreter                 (default ~/.venv-mjx/bin/python)
 #   STAGES          subset to run, e.g. "priors bc"    (default "priors bc amp")
+#   DR_SCALE        dynamics domain randomization 0..1 (default 0 = nominal physics)
+#   PRIORS          override priors npz (default checkpoints/amp_priors_<robot>_<TAG>.npz)
+#   BC_DIR          override BC checkpoint dir (default checkpoints/bc_pretrained_jax_<robot>_<TAG>)
+#   AMP_RESTORE     policy params.pkl to start AMP from (default $BC_DIR/params.pkl;
+#                   point at a previous run's iterN/final/params.pkl to continue it)
+#   AMP_RESTORE_DISC  matching discriminator.pkl (default: fresh discriminator)
+#   NICE            nice level for the python processes (default 10 — the
+#                   workstation runs other CPU work; training is GPU-bound)
+#   MEM_BUDGET_MB   kill the stage if its host RSS exceeds this (default 10000;
+#                   0 = no cap). Protects the user's other jobs from an OOM.
 #
 # Artifacts (names follow the robot so lineages never collide):
 #   checkpoints/amp_priors_<robot>_<TAG>.npz
@@ -35,17 +45,50 @@ AMP_STEPS="${AMP_STEPS:-50000000}"
 STYLE_WEIGHT="${STYLE_WEIGHT:-1.0}"
 PY="${PY:-$HOME/.venv-mjx/bin/python}"
 STAGES="${STAGES:-priors bc amp}"
+DR_SCALE="${DR_SCALE:-0}"
+NICE="${NICE:-10}"
+MEM_BUDGET_MB="${MEM_BUDGET_MB:-10000}"
 
 ROBOT="$HEXAPOD_ROBOT"
-PRIORS="checkpoints/amp_priors_${ROBOT}_${TAG}.npz"
-BC_DIR="checkpoints/bc_pretrained_jax_${ROBOT}_${TAG}"
+PRIORS="${PRIORS:-checkpoints/amp_priors_${ROBOT}_${TAG}.npz}"
+BC_DIR="${BC_DIR:-checkpoints/bc_pretrained_jax_${ROBOT}_${TAG}}"
+AMP_RESTORE="${AMP_RESTORE:-$BC_DIR/params.pkl}"
+AMP_RESTORE_DISC="${AMP_RESTORE_DISC:-}"
 RUN="amp_to_${ROBOT}_${TAG}"
 mkdir -p logs/stdout checkpoints
 
 log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
 want() { [[ " $STAGES " == *" $1 "* ]]; }
 
-log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' python=$PY"
+# run_stage <logfile> <cmd...> — runs the command under `nice`, tees its
+# output, and watches the process tree's resident memory: if it crosses
+# MEM_BUDGET_MB the stage is killed (exit 137) instead of starving the rest
+# of the machine. Peak RSS is logged either way.
+run_stage() {
+  local logfile="$1"; shift
+  nice -n "$NICE" "$@" > >(tee "$logfile") 2>&1 &
+  local pid=$! peak=0 rss
+  while kill -0 "$pid" 2>/dev/null; do
+    rss=$(ps -o rss= --pid "$pid" --ppid "$pid" 2>/dev/null | awk '{s+=$1} END {print int(s/1024)}')
+    rss="${rss:-0}"
+    (( rss > peak )) && peak=$rss
+    if (( MEM_BUDGET_MB > 0 && rss > MEM_BUDGET_MB )); then
+      log "MEMORY BUDGET EXCEEDED: rss=${rss} MB > ${MEM_BUDGET_MB} MB — killing pid $pid"
+      pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null
+      sleep 5; pkill -KILL -P "$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      log "stage killed (peak rss ${peak} MB)"
+      return 137
+    fi
+    sleep 5
+  done
+  local rc=0; wait "$pid" || rc=$?
+  log "stage exit=$rc  peak host rss=${peak} MB"
+  return "$rc"
+}
+
+log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
+log "priors=$PRIORS  bc_dir=$BC_DIR  amp_restore=$AMP_RESTORE  amp_restore_disc=${AMP_RESTORE_DISC:-<fresh>}"
 "$PY" -c "import jax; print('  jax devices:', jax.devices())"
 
 if want priors; then
@@ -53,8 +96,9 @@ if want priors; then
     log "priors exist → skip ($PRIORS)"
   else
     log "STAGE 1/3  scaffold priors → $PRIORS"
-    "$PY" -u amp/prior_data.py --cmd-mask paper_stance --n-steps "$PRIOR_STEPS" \
-        --out "$PRIORS" 2>&1 | tee "logs/stdout/priors_${ROBOT}_${TAG}.log"
+    run_stage "logs/stdout/priors_${ROBOT}_${TAG}.log" \
+        "$PY" -u amp/prior_data.py --cmd-mask paper_stance --n-steps "$PRIOR_STEPS" \
+        --out "$PRIORS"
   fi
 fi
 
@@ -63,8 +107,9 @@ if want bc; then
     log "BC checkpoint exists → skip ($BC_DIR)"
   else
     log "STAGE 2/3  BC pretrain → $BC_DIR"
-    "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space foot \
-        --out-dir "$BC_DIR" 2>&1 | tee "logs/stdout/bc_${ROBOT}_${TAG}.log"
+    run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
+        "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space foot \
+        --out-dir "$BC_DIR"
   fi
 fi
 
@@ -72,15 +117,18 @@ if want amp; then
   if [[ -f "checkpoints/$RUN/iter${AMP_SEGMENTS}/final/params.pkl" ]]; then
     log "AMP run complete → skip (checkpoints/$RUN)"
   else
-    log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps)"
-    "$PY" -u scripts/train_jax_amp.py \
-        --restore "$BC_DIR/params.pkl" \
+    log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE)"
+    disc_args=()
+    [[ -n "$AMP_RESTORE_DISC" ]] && disc_args=(--restore-discriminator "$AMP_RESTORE_DISC")
+    run_stage "logs/stdout/amp_${ROBOT}_${TAG}.log" \
+        "$PY" -u scripts/train_jax_amp.py \
+        --restore "$AMP_RESTORE" \
         --priors "$PRIORS" \
         --cmd-mask paper_stance --action-space foot \
         --style-weight "$STYLE_WEIGHT" \
         --segments "$AMP_SEGMENTS" --steps-per-segment "$AMP_STEPS" \
-        --partition-disc \
-        --run "$RUN" 2>&1 | tee "logs/stdout/amp_${ROBOT}_${TAG}.log"
+        --partition-disc --dr-scale "$DR_SCALE" "${disc_args[@]}" \
+        --run "$RUN"
   fi
 fi
 

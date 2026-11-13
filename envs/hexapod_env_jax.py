@@ -85,6 +85,35 @@ _TIBIA_BODY_NAMES  = tuple(f"tibia_{n}" for n in _LEG_NAMES)
 # No-progress ring buffer length — must be a JIT-compile-time constant.
 NO_PROGRESS_WINDOW = 400
 
+# ----------------------------------------------------------------------------
+# Dynamics domain randomization (stage 2, #82; added 2026-11-12).
+# Per-EPISODE multiplicative scales on the MJX model, sampled at reset and
+# applied to a per-env copy of the model at every physics step (the vmapped
+# step closes over the nominal model; `_randomized_model` builds the per-env
+# variant from the scales stored in EnvState.dr_scales). With dr_scale=0 the
+# scales are exactly 1.0 and the physics is bit-identical to the nominal env.
+# ----------------------------------------------------------------------------
+DR_FACTORS = ("friction", "motor_strength", "base_mass", "leg_mass", "joint_damping")
+N_DR = len(DR_FACTORS)
+# Full-strength ranges (dr_scale = 1). Sized for the mini hexapod's hardware
+# uncertainty budget: unknown floor surface (sliding friction), servo voltage
+# sag / optimistic spec (kp, kv and stall torque together), battery and
+# electronics payload (chassis mass + inertia), placeholder link masses, and
+# unknown gear friction (joint damping + frictionloss).
+DR_RANGES_FULL = np.array([
+    [0.50, 1.30],   # friction
+    [0.60, 1.30],   # motor strength
+    [0.80, 1.60],   # base (chassis) mass
+    [0.80, 1.25],   # leg link masses
+    [0.50, 2.00],   # joint damping + frictionloss
+], dtype=np.float32)
+
+
+def dr_ranges_for(dr_scale: float) -> jnp.ndarray:
+    """(N_DR, 2) lo/hi multiplicative ranges; dr_scale=0 → all exactly 1."""
+    r = 1.0 + float(dr_scale) * (DR_RANGES_FULL - 1.0)
+    return jnp.asarray(r, dtype=jnp.float32)
+
 
 # ----------------------------------------------------------------------------
 # Static config — NamedTuple of JAX-compatible values.
@@ -109,6 +138,23 @@ jax.tree_util.register_pytree_node(
 )
 
 
+class DynConfig(NamedTuple):
+    """Static dynamics switches (leaf-less pytree like ObsConfig).
+      dr_enabled  False: `_randomized_model` returns the nominal model object
+                  untouched, so the compiled step is EXACTLY the pre-DR graph
+                  (bit-identical rollouts for the frozen PhantomX lineage).
+                  True: per-episode DR scales are applied (dr_scale > 0).
+    """
+    dr_enabled: bool = False
+
+
+jax.tree_util.register_pytree_node(
+    DynConfig,
+    lambda cfg: ((), cfg),
+    lambda aux, children: aux,
+)
+
+
 class EnvParams(NamedTuple):
     mjx_model:         mjx.Model
     gait:              gait_jax.GaitParams
@@ -123,6 +169,7 @@ class EnvParams(NamedTuple):
     tibia_body_ids:    jnp.ndarray   # (6,) int32 — foot tip = xpos[tib] + R[tib] @ offset
     foot_local_offset: jnp.ndarray   # (3,) tibia-local foot-tip offset
     dw_envelope:       jnp.ndarray   # (4,) max_int, max_slope, min_int, min_slope (dh-conditional dw)
+    dr_ranges:         jnp.ndarray   # (N_DR, 2) per-factor lo/hi dynamics-DR scales (1,1 = off)
     # Reward weights and gates.
     # DEPRECATED weights (post-2026-05-07 paper-aligned redesign). Kept as
     # fields for backward compat with any code that constructs EnvParams
@@ -276,6 +323,8 @@ class EnvParams(NamedTuple):
 
     # Observation layout — see ObsConfig (static aux data, jit-safe).
     obs_cfg: ObsConfig = ObsConfig()
+    # Dynamics switches — see DynConfig (static aux data, jit-safe).
+    dyn_cfg: DynConfig = DynConfig()
 
 
 class EnvState(NamedTuple):
@@ -310,6 +359,8 @@ class EnvState(NamedTuple):
     # Joint targets applied at the previous step — the "hardware" obs
     # variant reports commanded angle + finite-difference velocity.
     prev_ctrl:            jnp.ndarray  # (18,)
+    # Dynamics-DR scales for THIS episode (see DR_FACTORS); all 1.0 when off.
+    dr_scales:            jnp.ndarray  # (N_DR,)
     gait_scale:         jnp.ndarray   # () float32 — externally mutable curriculum
     obs:                jnp.ndarray   # (obs_dim(variant),) — 78 "full", 75 "hardware"
     reward:             jnp.ndarray   # ()
@@ -327,7 +378,8 @@ def make_env_params(model_path: str,
                     scaffold_wz_trim_vx: float = 0.0,
                     scaffold_wz_trim_vy_abs: float = 0.0,
                     disturbance_enabled: bool = False,
-                    disturbance_magnitude_scale: float = 1.0) -> EnvParams:
+                    disturbance_magnitude_scale: float = 1.0,
+                    dr_scale: float = 0.0) -> EnvParams:
     """Load MJCF, build mjx model, calibrate gait — done once at startup.
 
     `cmd_mask_name` selects which cmd slots are sampled at episode reset.
@@ -336,6 +388,9 @@ def make_env_params(model_path: str,
         teaching the policy to handle live controller inputs).
     "stage1" = translation only (the curriculum starting point).
     "stage3" = full motion (translation + yaw + tilt + stance + shifts).
+    `dr_scale` (stage 2, 2026-11-12): 0 = nominal dynamics (default, bit-exact
+        with pre-DR behaviour); 1 = full DR_RANGES_FULL per-episode
+        randomization of friction / motor strength / masses / joint damping.
     """
     mj_model = mujoco.MjModel.from_xml_path(model_path)
     mjx_model = mjx.put_model(mj_model)
@@ -414,6 +469,8 @@ def make_env_params(model_path: str,
         obs_cfg=ObsConfig(variant=profile.obs_variant,
                           imu_available=profile.imu_available),
         dw_envelope=jnp.asarray(stance.dw_coeffs, dtype=jnp.float32),
+        dr_ranges=dr_ranges_for(dr_scale),
+        dyn_cfg=DynConfig(dr_enabled=float(dr_scale) > 0.0),
         # --- run configuration ---
         cmd_dynamics_enabled=cmd_dynamics_enabled,
         disturbance_enabled=disturbance_enabled,
@@ -842,10 +899,50 @@ def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint, prev_ctr
 # ----------------------------------------------------------------------------
 # reset / step / set_gait_scale
 # ----------------------------------------------------------------------------
+def _randomized_model(params: EnvParams, dr_scales: jnp.ndarray) -> mjx.Model:
+    """Per-env MJX model: nominal model with DR_FACTORS scales applied.
+    Called inside the vmapped reset/step, so the returned fields are per-env
+    while the untouched fields stay shared. Scales of exactly 1.0 return a
+    numerically identical model (x * 1.0 == x in IEEE float)."""
+    m = params.mjx_model
+    if not params.dyn_cfg.dr_enabled:
+        return m            # static switch: keep the exact nominal graph
+    s_fric, s_motor, s_base, s_leg, s_damp = (dr_scales[i] for i in range(N_DR))
+    nbody = m.body_mass.shape[0]
+    is_base = jnp.arange(nbody) == params.base_body_id
+    mass_scale = jnp.where(is_base, s_base, s_leg)              # world mass is 0 anyway
+    base_mass = m.body_mass[params.base_body_id]
+    # subtree masses: every leg subtree scales by s_leg; the two subtrees that
+    # contain the chassis (world, base) additionally pick up the chassis delta.
+    sub = m.body_subtreemass * s_leg
+    sub = sub.at[0].add((s_base - s_leg) * base_mass)
+    sub = sub.at[params.base_body_id].add((s_base - s_leg) * base_mass)
+    return m.replace(
+        geom_friction=m.geom_friction.at[:, 0].multiply(s_fric),
+        actuator_gainprm=m.actuator_gainprm.at[:, 0].multiply(s_motor),     # kp
+        actuator_biasprm=m.actuator_biasprm.at[:, 1:3].multiply(s_motor),   # -kp, -kv
+        actuator_forcerange=m.actuator_forcerange * s_motor,                # stall torque
+        body_mass=m.body_mass * mass_scale,
+        body_inertia=m.body_inertia * mass_scale[:, None],
+        body_subtreemass=sub,
+        dof_damping=m.dof_damping * s_damp,
+        dof_frictionloss=m.dof_frictionloss * s_damp,
+    )
+
+
+def sample_dr_scales(params: EnvParams, rng: jax.Array) -> jnp.ndarray:
+    lo, hi = params.dr_ranges[:, 0], params.dr_ranges[:, 1]
+    return jax.random.uniform(rng, (N_DR,), minval=lo, maxval=hi, dtype=jnp.float32)
+
+
 def reset(params: EnvParams,
           rng: jax.Array,
           gait_scale: float = 0.0) -> EnvState:
+    # DR key is folded off the episode key BEFORE the legacy 4-way split so
+    # cmd / spawn-noise streams (and thus dr_scale=0 rollouts) are unchanged.
+    dr_scales = sample_dr_scales(params, jax.random.fold_in(rng, 7919))
     rng, sample_rng, jn_rng, z_rng = jax.random.split(rng, 4)
+    model = _randomized_model(params, dr_scales)
     cmd = _sample_cmd(params, sample_rng)
 
     # Domain randomization: perturb spawn pose (joint angles + body z) so
@@ -869,7 +966,7 @@ def reset(params: EnvParams,
     mjx_data = mjx.make_data(params.mjx_model)
     mjx_data = mjx_data.replace(qpos=spawn_qpos,
                                 ctrl=params.gait_neutral_pose)
-    mjx_data = mjx.forward(params.mjx_model, mjx_data)
+    mjx_data = mjx.forward(model, mjx_data)
 
     sim_time   = jnp.float32(0.0)
     step_count = jnp.int32(0)
@@ -962,6 +1059,7 @@ def reset(params: EnvParams,
         next_push_in=next_push_in,
         linvel_ema=jnp.zeros(3, dtype=jnp.float32),
         prev_ctrl=prev_ctrl,
+        dr_scales=dr_scales,
     )
 
 
@@ -1101,7 +1199,7 @@ def step(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvState:
     xfrc = xfrc.at[params.base_body_id, 0:3].set(new_push_force)
 
     mjx_data = state.mjx_data.replace(ctrl=target, xfrc_applied=xfrc)
-    mjx_data = mjx.step(params.mjx_model, mjx_data)
+    mjx_data = mjx.step(_randomized_model(params, state.dr_scales), mjx_data)
 
     sim_time   = state.sim_time + params.mjx_model.opt.timestep
     step_count = state.step_count + 1
@@ -1206,7 +1304,7 @@ def step_foot(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvSta
     xfrc = xfrc.at[params.base_body_id, 0:3].set(new_push_force)
 
     mjx_data = state.mjx_data.replace(ctrl=target, xfrc_applied=xfrc)
-    mjx_data = mjx.step(params.mjx_model, mjx_data)
+    mjx_data = mjx.step(_randomized_model(params, state.dr_scales), mjx_data)
 
     sim_time   = state.sim_time + params.mjx_model.opt.timestep
     step_count = state.step_count + 1

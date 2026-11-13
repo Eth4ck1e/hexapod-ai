@@ -94,6 +94,7 @@ class HexapodAMPEnv(HexapodBraxEnv):
                  scaffold_wz_trim_vy_abs: float = 0.0,
                  disturbance_enabled: bool = False,
                  disturbance_magnitude_scale: float = 1.0,
+                 dr_scale: float = 0.0,
                  multihead_disc: bool = False):
         super().__init__(model_path, gait_scale=gait_scale,
                          cmd_mask=cmd_mask, action_space=action_space,
@@ -101,7 +102,8 @@ class HexapodAMPEnv(HexapodBraxEnv):
                          scaffold_wz_trim_vx=scaffold_wz_trim_vx,
                          scaffold_wz_trim_vy_abs=scaffold_wz_trim_vy_abs,
                          disturbance_enabled=disturbance_enabled,
-                         disturbance_magnitude_scale=disturbance_magnitude_scale)
+                         disturbance_magnitude_scale=disturbance_magnitude_scale,
+                         dr_scale=dr_scale)
         self._disc_params = discriminator_params
         self._multihead = bool(multihead_disc)
         self._bin_spec = bin_spec_for(model_path)   # robot-specific bin edges

@@ -282,3 +282,49 @@ def test_gym_env_follows_profile(mujoco_available, fname, variant, dim):
     if variant == "hardware":
         np.testing.assert_allclose(obs[:18], env._data.ctrl, atol=1e-6)
         np.testing.assert_allclose(obs[36:40], [1, 0, 0, 0])
+
+
+@mjx_available
+def test_dynamics_domain_randomization(mujoco_available):
+    """dr_scale=0 keeps the nominal model object (bit-exact legacy graph);
+    dr_scale=1 samples per-episode scales inside DR_RANGES_FULL and the
+    per-env model carries them consistently (mass, subtree mass, kp, stall)."""
+    import jax
+    import jax.numpy as jnp
+    from envs import hexapod_env_jax as hx
+
+    model = str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml")
+    p0 = hx.make_env_params(model, cmd_mask_name="paper_stance")
+    assert not p0.dyn_cfg.dr_enabled
+    assert np.array_equal(np.asarray(p0.dr_ranges), np.ones((hx.N_DR, 2), np.float32))
+    s0 = hx.reset(p0, jax.random.PRNGKey(1))
+    assert np.array_equal(np.asarray(s0.dr_scales), np.ones(hx.N_DR, np.float32))
+    assert hx._randomized_model(p0, s0.dr_scales) is p0.mjx_model
+
+    p1 = hx.make_env_params(model, cmd_mask_name="paper_stance", dr_scale=1.0)
+    assert p1.dyn_cfg.dr_enabled
+    # cmd / spawn-noise streams are unchanged by DR (key folded off separately).
+    s1 = hx.reset(p1, jax.random.PRNGKey(1))
+    assert np.array_equal(np.asarray(s1.cmd), np.asarray(s0.cmd))
+    sc = np.asarray(s1.dr_scales)
+    assert np.all(sc >= hx.DR_RANGES_FULL[:, 0]) and np.all(sc <= hx.DR_RANGES_FULL[:, 1])
+    m = hx._randomized_model(p1, s1.dr_scales)
+    nom = p1.mjx_model
+    base = p1.base_body_id
+    s_fric, s_motor, s_base, s_leg, s_damp = sc
+    np.testing.assert_allclose(m.body_mass[base], nom.body_mass[base] * s_base, rtol=1e-6)
+    np.testing.assert_allclose(m.body_mass[base + 1], nom.body_mass[base + 1] * s_leg, rtol=1e-6)
+    # subtree mass of the base must equal the sum of the scaled body masses
+    np.testing.assert_allclose(m.body_subtreemass[base], np.sum(np.asarray(m.body_mass)), rtol=1e-5)
+    np.testing.assert_allclose(m.actuator_gainprm[:, 0], nom.actuator_gainprm[:, 0] * s_motor, rtol=1e-6)
+    np.testing.assert_allclose(m.actuator_biasprm[:, 1], -m.actuator_gainprm[:, 0], rtol=1e-6)
+    np.testing.assert_allclose(m.actuator_forcerange, nom.actuator_forcerange * s_motor, rtol=1e-6)
+    np.testing.assert_allclose(m.geom_friction[:, 0], nom.geom_friction[:, 0] * s_fric, rtol=1e-6)
+    np.testing.assert_allclose(m.dof_damping, nom.dof_damping * s_damp, rtol=1e-6)
+    # Randomized env steps stay finite under vmap (two different episodes).
+    step = jax.jit(jax.vmap(lambda s, a: hx.step_foot(p1, s, a)))
+    st = jax.vmap(lambda k: hx.reset(p1, k, gait_scale=1.0))(jax.random.split(jax.random.PRNGKey(2), 2))
+    assert not np.array_equal(np.asarray(st.dr_scales[0]), np.asarray(st.dr_scales[1]))
+    for _ in range(20):
+        st = step(st, jnp.zeros((2, 18), jnp.float32))
+    assert np.isfinite(np.asarray(st.obs)).all() and not np.asarray(st.done).any()

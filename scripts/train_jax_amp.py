@@ -453,6 +453,11 @@ def main():
                    help="magnitude scale at full curriculum")
     p.add_argument("--recovery-full-segment", type=int, default=10,
                    help="segment at which magnitude reaches end-scale")
+    p.add_argument("--dr-scale", type=float, default=0.0,
+                   help="dynamics domain randomization strength (stage 2, #82): "
+                        "0 = nominal physics, 1 = full per-episode randomization of "
+                        "friction / motor strength / masses / joint damping "
+                        "(envs.hexapod_env_jax.DR_RANGES_FULL). Priors stay nominal.")
     p.add_argument("--partition-disc", action="store_true",
                    help="enable v23+ partition discriminator (150 bins, "
                         "6 motion x 5 height x 5 width). Requires priors npz "
@@ -473,6 +478,7 @@ def main():
     print(f"  segments={args.segments}  steps/seg={args.steps_per_segment:,d}  "
           f"style_w={args.style_weight}")
     print(f"  cmd_mask={args.cmd_mask}  action_space={args.action_space}")
+    print(f"  dr_scale={args.dr_scale}  (dynamics DR: 0 = nominal physics)")
     print(f"  prior data: {args.priors}")
     print(f"  bc init:    {args.restore}")
     print("=" * 70)
@@ -614,6 +620,7 @@ def main():
             scaffold_wz_trim_vy_abs=args.wz_trim_vy_abs,
             disturbance_enabled=args.recovery_curriculum,
             disturbance_magnitude_scale=disturbance_scale,
+            dr_scale=args.dr_scale,
             discriminator_hidden=DISC_HIDDEN,
             multihead_disc=args.partition_disc,
         )

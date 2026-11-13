@@ -52,7 +52,8 @@ class HexapodBraxEnv(Env):
                  scaffold_wz_trim_vx: float = 0.0,
                  scaffold_wz_trim_vy_abs: float = 0.0,
                  disturbance_enabled: bool = False,
-                 disturbance_magnitude_scale: float = 1.0):
+                 disturbance_magnitude_scale: float = 1.0,
+                 dr_scale: float = 0.0):
         self._params = hex_jax.make_env_params(
             model_path,
             cmd_mask_name=cmd_mask,
@@ -61,8 +62,10 @@ class HexapodBraxEnv(Env):
             scaffold_wz_trim_vy_abs=scaffold_wz_trim_vy_abs,
             disturbance_enabled=disturbance_enabled,
             disturbance_magnitude_scale=disturbance_magnitude_scale,
+            dr_scale=dr_scale,
         )
         self._gait_scale = float(gait_scale)
+        self._dr_scale = float(dr_scale)
         self._cmd_mask_name = cmd_mask
         if action_space not in ("joint", "foot"):
             raise ValueError(f"action_space must be 'joint' or 'foot', "
@@ -120,3 +123,8 @@ class HexapodBraxEnv(Env):
     @property
     def gait_scale(self) -> float:
         return self._gait_scale
+
+    @property
+    def dr_scale(self) -> float:
+        """Dynamics domain-randomization strength (0 = nominal physics)."""
+        return self._dr_scale
