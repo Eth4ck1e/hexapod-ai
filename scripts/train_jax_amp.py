@@ -454,6 +454,11 @@ def main():
                    help="magnitude scale at full curriculum")
     p.add_argument("--recovery-full-segment", type=int, default=10,
                    help="segment at which magnitude reaches end-scale")
+    p.add_argument("--iter-offset", type=int, default=0,
+                   help="number the checkpoints from iter<offset+1> and count env "
+                        "steps from offset*steps_per_segment. Lets run_pipeline.sh run "
+                        "each segment in a fresh process (host RSS grows ~0.6 GB per "
+                        "in-process segment; a shared workstation cannot afford 10).")
     p.add_argument("--dr-scale", type=float, default=0.0,
                    help="dynamics domain randomization strength (stage 2, #82): "
                         "0 = nominal physics, 1 = full per-episode randomization of "
@@ -572,6 +577,7 @@ def main():
     log_dir = Path("logs") / args.run / "amp"
     log_dir.mkdir(parents=True, exist_ok=True)
     _PROG["tb"] = SummaryWriter(logdir=str(log_dir))
+    _PROG["outer_steps"] = args.iter_offset * args.steps_per_segment   # continue the step axis
     print(f"  tensorboard: {log_dir}")
 
     t0 = time.perf_counter()
@@ -664,7 +670,7 @@ def main():
         print(f"  PPO segment done in {(time.perf_counter()-seg_t0)/60:.1f} min")
 
         # 3. Save policy checkpoint per segment (async — non-blocking).
-        ckpt_dir = Path("checkpoints") / args.run / f"iter{seg+1}" / "final"
+        ckpt_dir = Path("checkpoints") / args.run / f"iter{args.iter_offset + seg + 1}" / "final"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         _async_pickle_save(ppo_params, ckpt_dir / "params.pkl")
         print(f"  saving policy (bg): {ckpt_dir/'params.pkl'}")

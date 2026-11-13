@@ -26,6 +26,10 @@
 #                   workstation runs other CPU work; training is GPU-bound)
 #   MEM_BUDGET_MB   kill the stage if its host RSS exceeds this (default 10000;
 #                   0 = no cap). Protects the user's other jobs from an OOM.
+#   SEGMENT_ISOLATION  1 (default): run every AMP segment in its own python
+#                   process (restore from the previous iter) so host RSS resets
+#                   each segment (~6 GB peak instead of +0.6 GB/segment growth,
+#                   which killed v1dr at segment 10). 0 = one long process.
 #
 # Artifacts (names follow the robot so lineages never collide):
 #   checkpoints/amp_priors_<robot>_<TAG>.npz
@@ -48,6 +52,7 @@ STAGES="${STAGES:-priors bc amp}"
 DR_SCALE="${DR_SCALE:-0}"
 NICE="${NICE:-10}"
 MEM_BUDGET_MB="${MEM_BUDGET_MB:-10000}"
+SEGMENT_ISOLATION="${SEGMENT_ISOLATION:-1}"
 
 ROBOT="$HEXAPOD_ROBOT"
 PRIORS="${PRIORS:-checkpoints/amp_priors_${ROBOT}_${TAG}.npz}"
@@ -66,7 +71,10 @@ want() { [[ " $STAGES " == *" $1 "* ]]; }
 # of the machine. Peak RSS is logged either way.
 run_stage() {
   local logfile="$1"; shift
-  nice -n "$NICE" "$@" > >(tee "$logfile") 2>&1 &
+  : > "$logfile"
+  # tee -a: the watchdog appends [mem] lines to the same file; without O_APPEND
+  # tee keeps its own offset and overwrites them.
+  nice -n "$NICE" "$@" > >(tee -a "$logfile") 2>&1 &
   local pid=$! peak=0 rss tick=0
   while kill -0 "$pid" 2>/dev/null; do
     rss=$(ps -o rss= --pid "$pid" --ppid "$pid" 2>/dev/null | awk '{s+=$1} END {print int(s/1024)}')
@@ -119,18 +127,36 @@ if want amp; then
   if [[ -f "checkpoints/$RUN/iter${AMP_SEGMENTS}/final/params.pkl" ]]; then
     log "AMP run complete → skip (checkpoints/$RUN)"
   else
-    log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE)"
-    disc_args=()
-    [[ -n "$AMP_RESTORE_DISC" ]] && disc_args=(--restore-discriminator "$AMP_RESTORE_DISC")
-    run_stage "logs/stdout/amp_${ROBOT}_${TAG}.log" \
-        "$PY" -u scripts/train_jax_amp.py \
-        --restore "$AMP_RESTORE" \
-        --priors "$PRIORS" \
-        --cmd-mask paper_stance --action-space foot \
-        --style-weight "$STYLE_WEIGHT" \
-        --segments "$AMP_SEGMENTS" --steps-per-segment "$AMP_STEPS" \
-        --partition-disc --dr-scale "$DR_SCALE" "${disc_args[@]}" \
-        --run "$RUN"
+    log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE, isolation=$SEGMENT_ISOLATION)"
+    amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space foot
+                --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
+                --partition-disc --dr-scale "$DR_SCALE" --run "$RUN")
+    if [[ "$SEGMENT_ISOLATION" == "1" ]]; then
+      # One process per segment. Resume-aware: segments whose params.pkl exist
+      # are skipped and the next one restores from the latest complete iter.
+      restore="$AMP_RESTORE"; restore_disc="$AMP_RESTORE_DISC"
+      for (( seg=1; seg<=AMP_SEGMENTS; seg++ )); do
+        it="checkpoints/$RUN/iter${seg}/final"
+        if [[ -f "$it/params.pkl" ]]; then
+          log "segment $seg/$AMP_SEGMENTS exists → skip"
+        else
+          log "segment $seg/$AMP_SEGMENTS  restore=$restore  disc=${restore_disc:-<fresh>}"
+          disc_args=()
+          [[ -n "$restore_disc" ]] && disc_args=(--restore-discriminator "$restore_disc")
+          run_stage "logs/stdout/amp_${ROBOT}_${TAG}_seg${seg}.log" \
+              "$PY" -u scripts/train_jax_amp.py --restore "$restore" --segments 1 \
+              --iter-offset $(( seg - 1 )) "${disc_args[@]}" "${amp_common[@]}"
+        fi
+        restore="$it/params.pkl"
+        [[ -f "$it/discriminator.pkl" ]] && restore_disc="$it/discriminator.pkl"
+      done
+    else
+      disc_args=()
+      [[ -n "$AMP_RESTORE_DISC" ]] && disc_args=(--restore-discriminator "$AMP_RESTORE_DISC")
+      run_stage "logs/stdout/amp_${ROBOT}_${TAG}.log" \
+          "$PY" -u scripts/train_jax_amp.py --restore "$AMP_RESTORE" \
+          --segments "$AMP_SEGMENTS" "${disc_args[@]}" "${amp_common[@]}"
+    fi
   fi
 fi
 
