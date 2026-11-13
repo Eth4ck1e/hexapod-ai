@@ -96,7 +96,9 @@ def main() -> None:
         name, _, path = spec.partition("=")
         if not path:
             name, path = Path(spec).parts[-4] if len(Path(spec).parts) >= 4 else spec, spec
-        from watch_demo_jax import _build_inference_fn   # needs brax; lazy so scaffold-only runs anywhere
+        from watch_demo_jax import (
+            _build_inference_fn,  # needs brax; lazy so scaffold-only runs anywhere
+        )
         norm, pol, obs_dim = load_policy(path)
         raw = _build_inference_fn(obs_dim, 18, deterministic=True)
         infer = (lambda norm, pol, raw: (lambda obs: jnp.tanh(raw(norm, pol, obs, None))))(norm, pol, raw)
@@ -121,7 +123,7 @@ def main() -> None:
                   f"{row['r_lin']:7.3f} {row['r_ang']:7.3f} {row['alive_steps']:7.0f}   ({time.time()-t0:.0f}s)")
         if dr > 0:
             sc = res["dr_scales"]
-            print(f"           dr draws: " + "  ".join(f"{f}[{sc[:, i].min():.2f},{sc[:, i].max():.2f}]"
+            print("           dr draws: " + "  ".join(f"{f}[{sc[:, i].min():.2f},{sc[:, i].max():.2f}]"
                                                   for i, f in enumerate(hx.DR_FACTORS)))
     if args.csv:
         with open(args.csv, "w", newline="") as f:
