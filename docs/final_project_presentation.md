@@ -16,7 +16,11 @@ corresponding run; everything else is already true today.
    scaffold with Adversarial Motion Priors (AMP) so the policy stays
    "hexapod-like", randomize the physics so it survives my measurement errors,
    stream the learned joint targets to the robot over USB.
-5. **Result**: `TODO` (sim videos + robustness table + live demo).
+5. **Result (sim, so far)**: the learned policy walks and tracks commands as well as
+   the hand-written gait (tracking 0.95 vs 0.96), and *both* survive 2× changes in
+   friction, servo strength and payload with ~0 falls. On flat ground the hand-written
+   gait is already near-optimal; the learned part is insurance for where the model is
+   wrong (hardware), and the real test is the live demo.
 
 ## 2. Suggested slide order (12–15 min)
 
@@ -31,7 +35,7 @@ corresponding run; everything else is already true today.
 | 7 | What the policy sees / does: 75-dim obs (cmd, phase, scaffold intent, own commands), 18-dim foot residual action, 200 Hz | obs/action table |
 | 8 | Sim result 1: it walks (PhantomX v27 and mini v1 videos) | `media/recordings/v27_iter5_showcase.mp4`, `mini_v1_iter10_showcase.mp4` |
 | 9 | Honest finding: on flat ground AMP reproduces the scaffold (tracking 0.95 vs 0.96) — the learned part earns its keep only when the scaffold is wrong | eval table |
-| 10 | Sim-to-real plan: calibrate real joint limits/trims (firmware `L`/`J` → importer), domain randomization over friction / servo strength / mass / damping | `tools/eval_dr_robustness.py` table (`TODO v1dr`) |
+| 10 | Sim-to-real plan: calibrate real joint limits/trims (firmware `L`/`J` → importer), domain randomization over friction / servo strength / mass / damping — robustness table shows scaffold and policy both at 0 % falls up to 1.5× the DR range | robustness table from `media/plots/dr_robustness_mini.csv` |
 | 11 | Deployment: tethered — laptop runs scaffold + policy, streams 18 joint targets at 50 Hz over serial; 500 ms watchdog homes the legs | diagram; `scripts/drive_serial.py` |
 | 12 | Live demo (or video fallback) | see runbook |
 | 13 | Limitations: no IMU → feed-forward policy, can't react to pushes; placeholder masses until measured; servo torque is the ceiling (~0.12 m/s) | bullets |
@@ -45,7 +49,8 @@ corresponding run; everything else is already true today.
 | Mini v1 run time | 68 min end-to-end (priors 1.0M transitions, BC, 10 × 50M PPO) | pipeline log |
 | Mini v1 eval reward | +2222 → +2302 (iter 3) → +2298 (iter 10), max ≈ 2500 | plot |
 | Tracking vs scaffold (stage 1 / 2) | 0.95 / 0.89 policy vs 0.96 / 0.93 scaffold, 0 falls | `eval_bc_quick.py` |
-| Dynamics DR run (v1dr) | `TODO` eval reward, fall % at dr 0 / 1 / 1.5 vs v1 and scaffold | `tools/eval_dr_robustness.py` |
+| Dynamics DR run (v1dr) | continued v1 for 9 × 50M steps under full DR: eval +2278 → +2296 → +2289 (flat, same level as nominal) | `media/plots/training_curves_mini_v1_v1dr.png` |
+| Robustness (512 paired episodes × 1000 steps, falls %) | dr 0: scaffold 0 / v1 0 / v1dr 0 · dr 1.0: 0 / 0 / 0 · dr 1.5 (friction 0.25–1.45×, servo 0.4–1.45×, chassis mass 0.7–1.9×): 0.2 / 0.2 / 0.2; any-termination 3.5 / 3.3 / 3.1 % | `media/plots/dr_robustness_mini.csv` |
 | Real-bot result | `TODO` (scaffold-only first, then policy) | demo log CSV |
 
 ## 4. Demo runbook (live)

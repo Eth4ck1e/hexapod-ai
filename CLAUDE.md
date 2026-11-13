@@ -219,7 +219,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
 | `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). Robot via `HEXAPOD_ROBOT`. |
 | `scripts/drive_serial.py` | **Tethered deployment**: host-side scaffold + policy → `J a0..a17` frames over serial to the mini firmware's `P` mode. `--dry-run`, `--source demo|hold|gamepad`, `--log-csv`. |
-| `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Knobs: `DR_SCALE`, `STAGES`, `PRIORS`/`BC_DIR`/`AMP_RESTORE`/`AMP_RESTORE_DISC` (continue an earlier run), `NICE` (default 10) and `MEM_BUDGET_MB` (default 10000: a watchdog kills the stage if host RSS exceeds it, logs `[mem]` every ~60 s and the peak — the workstation shares CPU/RAM with the user's other jobs. A 50M-step segment runs at ≈6 GB RSS but the NEXT segment's compile peaked at 11.6 GB before `train_jax_amp` started freeing executables between segments (`del env, train_fn; gc.collect(); jax.clear_caches()`); the launcher uses 12000). Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
+| `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Knobs: `DR_SCALE`, `STAGES`, `PRIORS`/`BC_DIR`/`AMP_RESTORE`/`AMP_RESTORE_DISC` (continue an earlier run), `NICE` (default 10) and `MEM_BUDGET_MB` (default 10000: a watchdog kills the stage if host RSS exceeds it, logs `[mem]` every ~60 s and the peak — the workstation shares CPU/RAM with the user's other jobs. A 50M-step segment runs at ≈6 GB RSS, but an in-process multi-segment run grows ≈0.6 GB per segment even after `gc.collect(); jax.clear_caches()` (v1dr hit 11.6 GB at segment 2 before that fix and 12.6 GB at segment 10 after it). Hence **`SEGMENT_ISOLATION=1` (default): every AMP segment is its own python process** (`train_jax_amp --segments 1 --iter-offset k`, restore from the previous iter; resume-aware), so the budget only has to cover one segment. Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
 | `tools/eval_dr_robustness.py` | Paired rollouts of policies + pure scaffold in the JAX env at several `--dr-scales`: fall %, termination %, tracking reward, alive steps. GPU in WSL (512 envs × 1000 steps in seconds); CPU for tiny sizes. |
 | `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
 | `scripts/watch_controller.py` | 8BitDo / Xbox controller-driven inference. Falls back to watch_demo_jax `--interactive` if no controller. |
@@ -452,10 +452,18 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   `media/recordings/mini_v1_iter10_showcase.mp4`. **Expect to rerun after
   measurement** (3 h incl. priors/BC); (4) ✅ firmware v0.2 (range
   calibration, JSON export, serial policy stream) + `scripts/drive_serial.py`;
-  (4b) 🔄 **dynamics-DR continuation** `amp_to_mini_hexapod_v1dr` (launched
-  2026-11-12 18:40, restores v1/iter10 + its disc, `DR_SCALE=1.0`, 10 × 50M):
-  the policy that goes on the bot should be the DR one — placeholder
-  masses/torque/friction are exactly what DR covers;
+  (4b) ✅ **dynamics-DR continuation** `amp_to_mini_hexapod_v1dr` (2026-11-12,
+  restores v1/iter10 + its disc, `DR_SCALE=1.0`; 9 of 10 segments — the
+  in-process run was killed by the memory watchdog at segment 10, so
+  **iter9 is final**; iter9 has params but no discriminator.pkl, use iter8's
+  disc to continue). JAX [EVAL] under DR +2278 → +2296 → +2289, i.e. flat
+  at v1's nominal level. `tools/eval_dr_robustness.py` (512 paired episodes,
+  1000 steps): falls 0 % for scaffold / v1 / v1dr at dr 0 and 1.0, 0.2 % each
+  at dr 1.5; any-termination at dr 1.5 3.5 / 3.3 / 3.1 %. **Conclusion: on
+  flat ground the scaffold is already robust to 2× dynamics changes and the
+  policy neither helps nor hurts** — DR over these factors is not where
+  sim-to-real risk lives for this bot; geometry, servo deadband/latency and
+  the 50 Hz zero-order hold are. Deploy v1dr/iter9 (copied to the Mac);
   (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
   re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
