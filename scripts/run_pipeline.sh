@@ -67,11 +67,13 @@ want() { [[ " $STAGES " == *" $1 "* ]]; }
 run_stage() {
   local logfile="$1"; shift
   nice -n "$NICE" "$@" > >(tee "$logfile") 2>&1 &
-  local pid=$! peak=0 rss
+  local pid=$! peak=0 rss tick=0
   while kill -0 "$pid" 2>/dev/null; do
     rss=$(ps -o rss= --pid "$pid" --ppid "$pid" 2>/dev/null | awk '{s+=$1} END {print int(s/1024)}')
     rss="${rss:-0}"
     (( rss > peak )) && peak=$rss
+    # Memory profile every ~60 s so a kill (or a close call) is explainable.
+    (( tick++ % 12 == 0 )) && printf '[%s] [mem] rss=%s MB peak=%s MB budget=%s MB\n' "$(date '+%T')" "$rss" "$peak" "$MEM_BUDGET_MB" >> "$logfile"
     if (( MEM_BUDGET_MB > 0 && rss > MEM_BUDGET_MB )); then
       log "MEMORY BUDGET EXCEEDED: rss=${rss} MB > ${MEM_BUDGET_MB} MB — killing pid $pid"
       pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import gc
 import pickle
 import threading
 import time
@@ -706,6 +707,16 @@ def main():
         # 6. Save discriminator checkpoint (async).
         _disc_save_thread = _async_pickle_save(
             disc_params, ckpt_dir / "discriminator.pkl")
+
+        # 7. Release this segment's compiled executables + Python garbage
+        # BEFORE the next segment compiles. Each segment builds a fresh env
+        # closure (new disc params) and recompiles PPO; without this the old
+        # executables linger and the host RSS peaks at >11 GB during the
+        # next compile (2026-11-12, shared workstation). `env` and `train_fn`
+        # are rebound next iteration, so drop them explicitly here.
+        del env, train_fn
+        gc.collect()
+        jax.clear_caches()
 
     # Final flush — wait for last segment's disc save to complete before exit.
     try:
