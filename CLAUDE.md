@@ -150,7 +150,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 
 - ✅ **Stage 0** — BC pretrain (mimics scaffold; zero foot residual = scaffold motion). Current best: `bc_pretrained_jax_v26b` (78-dim obs).
 - ✅ **Stage 1** — AMP-guided PPO with partition disc + paper-pure reward. Current best: latest `amp_to_v27*` (clean walker on best + final).
-- ⏳ **Stage 2** — Heavy domain randomization (#82). Motor strength, friction, payload, joint stiffness, IMU noise. Sim-to-real critical.
+- 🔄 **Stage 2** — Dynamics domain randomization (#82). **Implemented 2026-11-12** in the JAX env (`dr_scale`, per-episode friction / motor strength / chassis + leg mass / joint damping scales, see "Dynamics DR" below); first run `amp_to_mini_hexapod_v1dr`. Still missing: IMU noise (mini has no IMU anyway), actuator latency.
 - ⏳ **Stage 3** — Terrain randomization (#72). Perlin heightfield + obstacles. AMP's actual value-add over scaffold becomes visible here. Will likely need asymmetric A-C (#85) + memory encoder (#86) per paper.
 - ⏳ **Stage 4** — PTQ int8 quantization (#101). ~50 KB deployable model.
 - ⏳ **Stage 5** — ESP32-S3 firmware (#77). Policy inference + scaffold + servo bus + BT controller.
@@ -161,7 +161,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 
 **Now / immediate:**
 1. ✅ v27 walking — paper-pure + σ fix + smaller priors (DONE)
-2. ⏳ Heavy DR (#82) — motor strength, friction, payload, sensor noise
+2. 🔄 Heavy DR (#82) — dynamics DR landed 2026-11-12 (`--dr-scale`); sensor noise / latency still open
 
 **Phase 2 (after DR settles):**
 3. ⏳ Asymmetric A-C with privileged critic (#85) — paper's terrain solution
@@ -190,7 +190,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 - **Robot-profile refactor (2026-11-03) is bit-equivalent for PhantomX.** Verified: 2000 random cmds × 3 MJCFs × 2 speed levels, numpy old-vs-new error exactly 0.0; JAX old-vs-new 1e-15 rad. Snapshots in `snapshots/*_pre_robot_profile.py`.
 - **JAX controller has no arc-turning mode; gated per profile (2026-11-12).** `gait/controller.py` (eval/watch) switches to arc-aware foot paths when `MIN_TURN_RADIUS < speed/|wz| < MAX_TURN_RADIUS` only if `profile.arc_turning`; `gait/controller_jax.py` (training) always uses translate+spin superposition. PhantomX keeps `arc_turning=True` (legacy checkpoints/priors), so `python gait/controller_jax.py` parity still reports MISMATCH there — pre-existing. The mini profile sets `arc_turning=False`, so its eval scaffold equals its training scaffold.
 - **Env refactor to profiles (2026-11-12) verified with `tools/check_env_profile_parity.py`** (run in WSL): PhantomX old-vs-new `EnvParams` identical, reset obs + first steps bit-identical, later steps within GPU run-to-run noise. **The GPU MJX step is NOT bitwise deterministic run-to-run** (~1e-5 obs drift after ~20 steps) — never assert exact equality across GPU rollouts.
-- **`EnvParams` must stay jit-argument-safe.** Several tools pass params through `jax.jit` as an argument, so no raw str/bool config fields: static switches go in `ObsConfig`, a leaf-less registered pytree (travels as aux data).
+- **`EnvParams` must stay jit-argument-safe.** Several tools pass params through `jax.jit` as an argument, so no raw str/bool config fields: static switches go in `ObsConfig` / `DynConfig`, leaf-less registered pytrees (travels as aux data).
+- **Dynamics DR (2026-11-12, `envs/hexapod_env_jax.py`)**: `make_env_params(dr_scale=s)` → `EnvParams.dr_ranges = 1 + s·(DR_RANGES_FULL − 1)`; `reset()` samples `EnvState.dr_scales` (5 factors: friction, motor strength = kp/kv/stall together, chassis mass+inertia, leg mass+inertia, joint damping+frictionloss) from a key folded off the episode key, so cmd/spawn streams are unchanged; `_randomized_model()` builds the per-env `mjx.Model` INSIDE the vmapped reset/step via `model.replace(...)` (also fixes `body_subtreemass`). `DynConfig.dr_enabled=False` (dr_scale=0) returns the nominal model object so the compiled graph — and every legacy rollout — is bit-identical (verified on CPU MJX). Throughput cost at dr_scale=1: none measurable (~210k it/s). Priors stay nominal: the disc pulls the gait back to the nominal scaffold style under perturbed physics. Eval robustness with `tools/eval_dr_robustness.py` (paired policy-vs-scaffold rollouts per dr_scale). Mini caveat: the hardware obs carry no dynamics information (no IMU), so DR teaches a single robust-on-average residual, not an adaptive one.
 - **Per-joint sign conventions**: coxa always +1; femur +1 right / -1 left; tibia -1 right / +1 left. Don't "simplify" by negating all three for left legs — breaks the math.
 - **Foot tip is empirical**: tibia-local `(0.134, 0.031, 0.0)`. The simple models replicate this with a foot sphere geom at the same position.
 - **Foot z is normalized to uniform plane in body frame** (v21+). `gait/controller.py:calibrate()` sets `LEG_ORIGIN_BODY[:, 2] = mean(z)` so all 6 feet sit at exactly -145.99 mm in body frame. Fixes a 3mm asymmetry from MJCF coxa mount differences.
@@ -218,7 +219,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
 | `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). Robot via `HEXAPOD_ROBOT`. |
 | `scripts/drive_serial.py` | **Tethered deployment**: host-side scaffold + policy → `J a0..a17` frames over serial to the mini firmware's `P` mode. `--dry-run`, `--source demo|hold|gamepad`, `--log-csv`. |
-| `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
+| `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Knobs: `DR_SCALE`, `STAGES`, `PRIORS`/`BC_DIR`/`AMP_RESTORE`/`AMP_RESTORE_DISC` (continue an earlier run), `NICE` (default 10) and `MEM_BUDGET_MB` (default 10000: a watchdog kills the stage if host RSS exceeds it and logs peak RSS — the workstation shares CPU/RAM with the user's other jobs; a full AMP stage peaks ≈5.8 GB). Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
+| `tools/eval_dr_robustness.py` | Paired rollouts of policies + pure scaffold in the JAX env at several `--dr-scales`: fall %, termination %, tracking reward, alive steps. GPU in WSL (512 envs × 1000 steps in seconds); CPU for tiny sizes. |
 | `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
 | `scripts/watch_controller.py` | 8BitDo / Xbox controller-driven inference. Falls back to watch_demo_jax `--interactive` if no controller. |
 | `scripts/record_policy.py` | Offscreen MP4 render of policy + tracking + orbit camera. |
@@ -450,6 +452,10 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   `media/recordings/mini_v1_iter10_showcase.mp4`. **Expect to rerun after
   measurement** (3 h incl. priors/BC); (4) ✅ firmware v0.2 (range
   calibration, JSON export, serial policy stream) + `scripts/drive_serial.py`;
+  (4b) 🔄 **dynamics-DR continuation** `amp_to_mini_hexapod_v1dr` (launched
+  2026-11-12 18:40, restores v1/iter10 + its disc, `DR_SCALE=1.0`, 10 × 50M):
+  the policy that goes on the bot should be the DR one — placeholder
+  masses/torque/friction are exactly what DR covers;
   (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
   re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
@@ -458,6 +464,17 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   MAX_SPEED 0.075 m/s).
 - **Workstation note**: WSL was reinstalled 2026-07-21; `~/.venv-mjx` was
   rebuilt 2026-11-03 (jax[cuda12] 0.10, mujoco/mjx 3.7.0, brax 0.14.2).
+- **Workstation sharing (2026-11-12)**: the user runs other CPU-heavy jobs on it
+  (CPU ~94 %, ~10 GB RAM in java processes). Train with `nice` + the
+  `MEM_BUDGET_MB` watchdog (both default-on in `run_pipeline.sh`); check
+  free RAM before launching. CUDA inside WSL could only grab ~4 GB chunks
+  that day (preallocation fell back; training still ran at full speed at
+  4096 envs) — if `RESOURCE_EXHAUSTED` ever appears mid-run, drop
+  `--num-envs` to 2048 rather than fighting the allocator.
+- **Mac venv now has `mujoco-mjx` + `brax` (CPU)**: good for smoke tests,
+  parity snapshots and `tools/eval_dr_robustness.py` at tiny sizes; the
+  v1 mini policy is copied to the Mac under `checkpoints/amp_to_mini_hexapod_v1/iter10/final/`
+  (the laptop is what will drive the bot).
 
 ## Memory / sync
 
