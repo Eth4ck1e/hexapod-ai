@@ -144,8 +144,12 @@ class DynConfig(NamedTuple):
                   untouched, so the compiled step is EXACTLY the pre-DR graph
                   (bit-identical rollouts for the frozen PhantomX lineage).
                   True: per-episode DR scales are applied (dr_scale > 0).
+      ctrl_hold_steps  servo command latch period in sim steps
+                  (RobotProfile.ctrl_hold_steps). 1 = every step (PhantomX,
+                  legacy graph); 4 = the mini's 50 Hz PWM frame at 200 Hz.
     """
     dr_enabled: bool = False
+    ctrl_hold_steps: int = 1
 
 
 jax.tree_util.register_pytree_node(
@@ -470,7 +474,8 @@ def make_env_params(model_path: str,
                           imu_available=profile.imu_available),
         dw_envelope=jnp.asarray(stance.dw_coeffs, dtype=jnp.float32),
         dr_ranges=dr_ranges_for(dr_scale),
-        dyn_cfg=DynConfig(dr_enabled=float(dr_scale) > 0.0),
+        dyn_cfg=DynConfig(dr_enabled=float(dr_scale) > 0.0,
+                          ctrl_hold_steps=int(profile.ctrl_hold_steps)),
         # --- run configuration ---
         cmd_dynamics_enabled=cmd_dynamics_enabled,
         disturbance_enabled=disturbance_enabled,
@@ -930,6 +935,17 @@ def _randomized_model(params: EnvParams, dr_scales: jnp.ndarray) -> mjx.Model:
     )
 
 
+def _latched_ctrl(params: EnvParams, state: EnvState, target: jnp.ndarray) -> jnp.ndarray:
+    """Zero-order hold of the servo command: a new target is latched only on
+    steps where step_count % ctrl_hold_steps == 0 (step 0 included), otherwise
+    the previously applied ctrl stays. Static no-op when the hold is 1."""
+    hold = params.dyn_cfg.ctrl_hold_steps
+    if hold <= 1:
+        return target
+    latch = (state.step_count % hold) == 0
+    return jnp.where(latch, target, state.mjx_data.ctrl)
+
+
 def sample_dr_scales(params: EnvParams, rng: jax.Array) -> jnp.ndarray:
     lo, hi = params.dr_ranges[:, 0], params.dr_ranges[:, 1]
     return jax.random.uniform(rng, (N_DR,), minval=lo, maxval=hi, dtype=jnp.float32)
@@ -1198,6 +1214,7 @@ def step(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvState:
     xfrc = state.mjx_data.xfrc_applied
     xfrc = xfrc.at[params.base_body_id, 0:3].set(new_push_force)
 
+    target = _latched_ctrl(params, state, target)     # servo command rate (hold=1: no-op)
     mjx_data = state.mjx_data.replace(ctrl=target, xfrc_applied=xfrc)
     mjx_data = mjx.step(_randomized_model(params, state.dr_scales), mjx_data)
 
@@ -1303,6 +1320,7 @@ def step_foot(params: EnvParams, state: EnvState, action: jnp.ndarray) -> EnvSta
     xfrc = state.mjx_data.xfrc_applied
     xfrc = xfrc.at[params.base_body_id, 0:3].set(new_push_force)
 
+    target = _latched_ctrl(params, state, target)     # servo command rate (hold=1: no-op)
     mjx_data = state.mjx_data.replace(ctrl=target, xfrc_applied=xfrc)
     mjx_data = mjx.step(_randomized_model(params, state.dr_scales), mjx_data)
 

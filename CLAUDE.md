@@ -251,7 +251,7 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 
 | Path | Purpose |
 |------|---------|
-| `gait/robot_profile.py` | **SoT**: `RobotProfile` dataclass + registry (`PHANTOMX`, `get_profile`, `profile_for_model`, `register_profile`). All chassis-specific numbers live here. |
+| `gait/robot_profile.py` | **SoT**: `RobotProfile` dataclass + registry (incl. `ctrl_hold_steps`, `camera_distance`) (`PHANTOMX`, `get_profile`, `profile_for_model`, `register_profile`). All chassis-specific numbers live here. |
 | `gait/controller.py` | Numpy gait controller, robot-agnostic. `Controller()` → PhantomX; `Controller(model_path)` infers the profile from the MJCF filename via each profile's `model_patterns`; `Controller(profile=...)` is explicit. Bare module constants (`COXA_LENGTH`, `NEUTRAL_POSE`, ...) still exist as PhantomX aliases for old tools. Normalizes foot z to uniform plane (v21+). |
 | `gait/controller_jax.py` | Pure-JAX port. `build_params(model_path, profile=...)` calibrates via numpy `Controller` then copies constants (link lengths now live in `GaitParams`). |
 
@@ -464,6 +464,13 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   policy neither helps nor hurts** — DR over these factors is not where
   sim-to-real risk lives for this bot; geometry, servo deadband/latency and
   the 50 Hz zero-order hold are. Deploy v1dr/iter9 (copied to the Mac);
+  (4c) 🔄 **servo command hold** (2026-11-12 evening): `RobotProfile.ctrl_hold_steps`
+  (PhantomX 1, mini 4) — the PCA9685 emits 50 Hz PWM, so the real servos only
+  latch a new target every 20 ms; both envs now hold `ctrl` for 4 sim steps
+  (`DynConfig.ctrl_hold_steps`, static; PhantomX graph bit-identical) and
+  `drive_serial.py` feeds the policy the last SENT target. First run with it
+  (+ DR, + per-segment processes): `amp_to_mini_hexapod_v2h`, full pipeline
+  (priors → BC → 10 × 50M), launched 2026-11-12 ~20:10;
   (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
   re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and

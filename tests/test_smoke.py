@@ -328,3 +328,30 @@ def test_dynamics_domain_randomization(mujoco_available):
     for _ in range(20):
         st = step(st, jnp.zeros((2, 18), jnp.float32))
     assert np.isfinite(np.asarray(st.obs)).all() and not np.asarray(st.done).any()
+
+
+@mjx_available
+def test_servo_command_hold(mujoco_available):
+    """Mini latches a new servo target every ctrl_hold_steps (50 Hz PWM frame);
+    PhantomX keeps the legacy every-step update. Hardware obs report the
+    latched command."""
+    import jax
+    import jax.numpy as jnp
+    from envs import hexapod_env_jax as hx
+    from gait.robot_profile import MINI_HEXAPOD, PHANTOMX
+
+    assert PHANTOMX.ctrl_hold_steps == 1 and MINI_HEXAPOD.ctrl_hold_steps == 4
+    p = hx.make_env_params(str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml"),
+                           cmd_mask_name="paper_stance")
+    assert p.dyn_cfg.ctrl_hold_steps == 4
+    st = hx.reset(p, jax.random.PRNGKey(0), gait_scale=1.0)
+    step = jax.jit(lambda s: hx.step_foot(p, s, jnp.zeros(18, jnp.float32)))
+    ctrls = []
+    for _ in range(9):
+        st = step(st)
+        ctrls.append(np.asarray(st.mjx_data.ctrl))
+        np.testing.assert_allclose(np.asarray(st.obs[:18]), ctrls[-1], atol=1e-6)
+    # steps 1-3 hold the target latched at step 0, step 4 latches a new one, ...
+    assert np.array_equal(ctrls[0], ctrls[1]) and np.array_equal(ctrls[1], ctrls[3])
+    assert not np.array_equal(ctrls[3], ctrls[4])
+    assert np.array_equal(ctrls[4], ctrls[7]) and not np.array_equal(ctrls[7], ctrls[8])

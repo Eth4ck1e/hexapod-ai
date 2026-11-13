@@ -307,6 +307,7 @@ class HexapodEnv(gym.Env):
         self._spawn_z       = prof.spawn_z
         self._obs_variant   = prof.obs_variant
         self._imu_available = prof.imu_available
+        self._ctrl_hold     = int(prof.ctrl_hold_steps)   # servo command latch period (steps)
         foot_tip = np.asarray(self._ctrl.FOOT_TIP_LOCAL, dtype=np.float64)
         if np.ptp(foot_tip, axis=0).max() > 1e-3:
             raise ValueError(f"per-leg foot offsets differ by >1 mm: {foot_tip}")
@@ -456,7 +457,8 @@ class HexapodEnv(gym.Env):
         target = (scaffold_joints * self.gait_scale
                   + policy_target * (1.0 - self.gait_scale))
         self._prev_ctrl = self._data.ctrl.copy()
-        self._data.ctrl[:] = target
+        if self._step_count % self._ctrl_hold == 0:   # zero-order hold (mini: 50 Hz frame)
+            self._data.ctrl[:] = target
         # 2b. BC target — the action that, applied at gait_scale=0.0, would
         # produce the scaffold's joint targets exactly. Exposed in info for
         # supervised pretraining + (optional) auxiliary loss during RL.

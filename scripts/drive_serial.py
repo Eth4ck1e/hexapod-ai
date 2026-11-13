@@ -270,9 +270,16 @@ def main() -> None:
     cmd = source(t)
     _, feet0 = ctrl.predict_with_feet(cmd, t)
     prev_target, target = neutral.copy(), neutral.copy()
-    obs = hardware_obs(target, prev_target, dt, feet0, 0.0, cmd)
+    # The policy's obs carry the LAST SENT target (what the servos hold), not
+    # the per-tick target — same zero-order hold the env applies
+    # (RobotProfile.ctrl_hold_steps).
+    sent, prev_sent = neutral.copy(), neutral.copy()
+    obs = hardware_obs(sent, prev_sent, dt, feet0, 0.0, cmd)
 
     send_every = max(1, int(round(1.0 / (dt * args.send_rate))))
+    if send_every != ctrl.profile.ctrl_hold_steps:
+        print(f"WARNING: --send-rate gives a {send_every}-step hold but the profile was "
+              f"trained with ctrl_hold_steps={ctrl.profile.ctrl_hold_steps}")
     k = 0
     wall0 = time.time()
     last_print = -1.0
@@ -292,6 +299,7 @@ def main() -> None:
                 target = np.asarray(ctrl.body_to_joints(feet_target), dtype=np.float32)
 
             if k % send_every == 0:
+                sent = target
                 link.send(target)
                 link.drain()
                 if csv_f:
@@ -303,7 +311,8 @@ def main() -> None:
                           f"RR=({target[0]:+.3f},{target[1]:+.3f},{target[2]:+.3f})")
 
             t += dt
-            obs = hardware_obs(target, prev_target, dt, feet_t, (t / ctrl.gait_period) % 1.0, cmd)
+            obs = hardware_obs(sent, prev_sent, dt, feet_t, (t / ctrl.gait_period) % 1.0, cmd)
+            prev_sent = sent
             prev_target = target
             k += 1
             # Wall-clock pacing.

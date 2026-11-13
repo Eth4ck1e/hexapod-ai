@@ -145,6 +145,12 @@ class RobotProfile:
     # See envs/obs_layout.py.
     obs_variant: str = "full"
     imu_available: bool = True
+    # Servo command rate: a new joint target is latched only every
+    # `ctrl_hold_steps` sim steps (zero-order hold). PhantomX Dynamixels take
+    # a bus write every step (1); the mini's PCA9685 emits 50 Hz PWM and an
+    # analog servo samples the pulse once per 20 ms frame = 4 × 5 ms steps.
+    # `scripts/drive_serial.py` sends at the same 50 Hz.
+    ctrl_hold_steps: int = 1
     # --- rendering ---------------------------------------------------------
     # Default orbit-camera distance for scripts/record_policy.py (m); the
     # PhantomX value is the historical default, the mini is ~1/3 the size.
@@ -321,6 +327,7 @@ MINI_HEXAPOD = RobotProfile(
     # Deployment reality: open-loop servos, IMU not fitted yet.
     obs_variant="hardware",
     imu_available=False,
+    ctrl_hold_steps=4,          # 50 Hz PWM frame vs 200 Hz sim
     camera_distance=0.45,
 )
 
