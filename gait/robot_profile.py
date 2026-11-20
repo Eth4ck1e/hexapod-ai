@@ -284,7 +284,7 @@ MINI_HEXAPOD = RobotProfile(
     # tools/calibrate_scaffold_speed.py once the MJCF is trusted.
     gait_period=0.80,
     path_radius=0.015,                      # 30 mm stride, 15 mm lift × lift_scale
-    lift_scale=1.4,                         # 21 mm apex: 15 mm barely cleared the table on the
+    lift_scale=2.0,                         # 30 mm apex: 15 mm barely cleared the table, 21 mm still dragged on the
                                             # real bot (2026-11-20); re-clone the policy after changing
     path_res=100,
     stance_width=0.005,
