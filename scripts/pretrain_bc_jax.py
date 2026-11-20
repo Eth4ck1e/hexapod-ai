@@ -153,7 +153,7 @@ def _bc_loss(policy_params, normalizer_params, networks, obs_batch, bc_batch):
     return jnp.mean((mean - bc_batch) ** 2)
 
 
-def _train_bc(networks, obs_all, bc_all, n_epochs, batch_size, lr, rng):
+def _train_bc(networks, obs_all, bc_all, n_epochs, batch_size, lr, rng, log_std: float = LOG_STD_INIT):
     n_samples = obs_all.shape[0]
     obs_size  = obs_all.shape[-1]
     act_size  = bc_all.shape[-1]
@@ -208,14 +208,14 @@ def _train_bc(networks, obs_all, bc_all, n_epochs, batch_size, lr, rng):
     last_layer_key = max(policy_params["params"].keys(),
                          key=lambda k: int(k.split("_")[1]))
     last_bias = policy_params["params"][last_layer_key]["bias"]
-    new_bias = last_bias.at[act_size:].set(jnp.float32(LOG_STD_INIT))
+    new_bias = last_bias.at[act_size:].set(jnp.float32(log_std))
     new_layer = dict(policy_params["params"][last_layer_key])
     new_layer["bias"] = new_bias
     new_params = dict(policy_params["params"])
     new_params[last_layer_key] = new_layer
     policy_params = {"params": new_params}
-    print(f"  set policy log_std bias to {LOG_STD_INIT} "
-          f"(std≈{math.exp(LOG_STD_INIT):.3f}, ~{math.degrees(math.exp(LOG_STD_INIT)):.1f}° per-joint jitter)")
+    print(f"  set policy log_std bias to {log_std} "
+          f"(std≈{math.exp(log_std):.3f}, ~{math.degrees(math.exp(log_std)):.1f}° per-joint jitter)")
 
     # Init value head freshly (PPO will train it during RL phase).
     value_params = networks.value_network.init(jax.random.PRNGKey(SEED + 999))
@@ -228,6 +228,11 @@ def _train_bc(networks, obs_all, bc_all, n_epochs, batch_size, lr, rng):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--n-envs",     type=int, default=N_ENVS_DEMO)
+    parser.add_argument("--log-std",    type=float, default=LOG_STD_INIT,
+                        help="exploration log-std baked into the saved policy (PPO starts from it). "
+                             f"Default {LOG_STD_INIT} (~1° per joint). Joint-target policies (ACTION_SPACE "
+                             "joint) want less: the hardware obs differentiate the commanded angles, so "
+                             "action noise × 200 Hz lands in the velocity obs.")
     parser.add_argument("--n-steps",    type=int, default=N_STEPS_DEMO)
     parser.add_argument("--n-epochs",   type=int, default=N_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
@@ -286,7 +291,7 @@ def main() -> None:
     rng, train_rng = jax.random.split(rng)
     norm_p, pol_p, val_p = _train_bc(
         networks, obs_all, bc_all, args.n_epochs, args.batch_size,
-        LEARNING_RATE, train_rng)
+        LEARNING_RATE, train_rng, log_std=args.log_std)
 
     print("\n4. saving (normalizer, policy, value) tuple...")
     out_dir = Path(args.out_dir)

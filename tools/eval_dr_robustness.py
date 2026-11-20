@@ -62,16 +62,24 @@ def build_infer(norm, pol, obs_dim: int):
     return infer
 
 
-def rollout_fn(params: hx.EnvParams, n_steps: int, infer):
-    """infer(obs_batch) -> action_batch, or None for the pure scaffold."""
+def rollout_fn(params: hx.EnvParams, n_steps: int, infer, action_space: str = "foot"):
+    """infer(obs_batch) -> action_batch, or None for the pure scaffold.
+
+    foot : policy = residual on the scaffold's feet (zero action == scaffold).
+    joint: policy outputs joint targets (zero action == standing still), so the
+           pure-scaffold row runs with gait_scale=1.0 instead.
+    """
+    step = hx.step_foot if action_space == "foot" else hx.step
+    scaffold_gs = 1.0 if (infer is None and action_space == "joint") else 0.0
+
     def one(keys):
-        st = jax.vmap(lambda k: hx.reset(params, k, gait_scale=0.0))(keys)
+        st = jax.vmap(lambda k: hx.reset(params, k, gait_scale=scaffold_gs))(keys)
         n = keys.shape[0]
 
         def body(carry, _):
             st, alive = carry
             act = jnp.zeros((n, 18), jnp.float32) if infer is None else infer(st.obs)
-            st = jax.vmap(lambda s, a: hx.step_foot(params, s, a))(st, act)
+            st = jax.vmap(lambda s, a: step(params, s, a))(st, act)
             out = dict(
                 r_lin=st.metrics["r_lin_track"] * alive,
                 r_ang=st.metrics["r_ang_track"] * alive,
@@ -105,7 +113,15 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--csv", type=Path, default=None)
+    ap.add_argument("--action-space", choices=["foot", "joint"], default=None,
+                    help="default: the chain_train session's ACTION_SPACE (HEXAPOD_ROBOT)")
     args = ap.parse_args()
+    if args.action_space is None:
+        import chain_train
+        action_space = chain_train.ACTION_SPACE
+    else:
+        action_space = args.action_space
+    print(f"action space: {action_space}")
 
     policies = []
     if not args.no_scaffold:
@@ -127,7 +143,7 @@ def main() -> None:
         env_obs = int(hx.reset(params, keys[0]).obs.shape[-1])
         for name, infer in policies:
             t0 = time.time()
-            res = rollout_fn(params, args.steps, infer)(keys)
+            res = rollout_fn(params, args.steps, infer, action_space)(keys)
             res = {k: np.asarray(v) for k, v in res.items()}
             row = dict(policy=name, dr_scale=dr, fall_rate=float(res["fall_rate"]),
                        done_rate=float(res["done_rate"]), r_lin=float(res["r_lin"]),

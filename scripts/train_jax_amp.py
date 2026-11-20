@@ -417,6 +417,10 @@ def main():
     p.add_argument("--action-space", type=str, default=ACTION_SPACE,
                    choices=["joint", "foot"])
     p.add_argument("--style-weight", type=float, default=STYLE_WEIGHT)
+    p.add_argument("--learning-rate", type=float, default=LEARNING_RATE,
+                   help=f"PPO Adam learning rate (default {LEARNING_RATE}; joint-target policies: try 1e-4)")
+    p.add_argument("--entropy-cost", type=float, default=ENTROPY_COST,
+                   help=f"PPO entropy bonus (default {ENTROPY_COST})")
     p.add_argument("--run", type=str, default=RUN_BASE)
     p.add_argument("--restore-discriminator", type=str, default=None,
                    help="optional path to a previously-saved discriminator.pkl. "
@@ -643,8 +647,8 @@ def main():
             num_timesteps      = args.steps_per_segment,
             num_envs           = args.num_envs,
             episode_length     = EPISODE_LENGTH,
-            learning_rate      = LEARNING_RATE,
-            entropy_cost       = ENTROPY_COST,
+            learning_rate      = args.learning_rate,
+            entropy_cost       = args.entropy_cost,
             discounting        = DISCOUNT,
             unroll_length      = UNROLL_LENGTH,
             network_factory    = _custom_network_factory,

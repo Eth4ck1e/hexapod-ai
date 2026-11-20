@@ -17,6 +17,10 @@
 #   PY              python interpreter                 (default ~/.venv-mjx/bin/python)
 #   STAGES          subset to run, e.g. "priors bc"    (default "priors bc amp")
 #   DR_SCALE        dynamics domain randomization 0..1 (default 0 = nominal physics)
+#   LOG_STD         exploration log-std baked by BC (default -4.0; joint-target policies: -6)
+#   LEARNING_RATE   PPO learning rate (default 3e-4; joint-target policies: 1e-4)
+#   ENTROPY_COST    PPO entropy bonus (default 1e-3)
+#   ACTION_SPACE    foot | joint (default: the chain_train session's)
 #   PRIORS          override priors npz (default checkpoints/amp_priors_<robot>_<TAG>.npz)
 #   BC_DIR          override BC checkpoint dir (default checkpoints/bc_pretrained_jax_<robot>_<TAG>)
 #   AMP_RESTORE     policy params.pkl to start AMP from (default $BC_DIR/params.pkl;
@@ -101,7 +105,7 @@ run_stage() {
   return "$rc"
 }
 
-log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' action_space=$ACTION_SPACE dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
+log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' action_space=$ACTION_SPACE log_std=${LOG_STD:-default} lr=${LEARNING_RATE:-default} entropy=${ENTROPY_COST:-default} dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
 log "priors=$PRIORS  bc_dir=$BC_DIR  amp_restore=$AMP_RESTORE  amp_restore_disc=${AMP_RESTORE_DISC:-<fresh>}"
 "$PY" -c "import jax; print('  jax devices:', jax.devices())"
 
@@ -123,7 +127,7 @@ if want bc; then
     log "STAGE 2/3  BC pretrain → $BC_DIR"
     run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
         "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space "$ACTION_SPACE" \
-        --out-dir "$BC_DIR"
+        ${LOG_STD:+--log-std "$LOG_STD"} --out-dir "$BC_DIR"
   fi
 fi
 
@@ -134,6 +138,7 @@ if want amp; then
     log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE, isolation=$SEGMENT_ISOLATION)"
     amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space "$ACTION_SPACE"
                 --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
+                ${LEARNING_RATE:+--learning-rate "$LEARNING_RATE"} ${ENTROPY_COST:+--entropy-cost "$ENTROPY_COST"}
                 --partition-disc --dr-scale "$DR_SCALE" --run "$RUN")
     if [[ "$SEGMENT_ISOLATION" == "1" ]]; then
       # One process per segment. Resume-aware: segments whose params.pkl exist
