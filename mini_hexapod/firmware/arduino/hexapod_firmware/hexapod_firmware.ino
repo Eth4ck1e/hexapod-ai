@@ -427,9 +427,28 @@ void printMainMenu() {
   Serial.println("  U  upload saved calibration from the host (tools/mini_push_config.py)");
   Serial.println("  X  export full config as C++");
   Serial.println("  J  export full config as JSON (for the simulator)");
+  Serial.println("  C  I2C scan (are both PCA9685 boards answering?)");
   Serial.println("  R  reset all NVS to defaults (confirm)");
   Serial.println("  ?  reprint this menu");
   Serial.println("(within any mode: 'm' returns here)");
+}
+
+// Quick wiring check: list every I2C device and flag the two servo drivers.
+void i2cScan() {
+  Serial.print("I2C scan (SDA="); Serial.print(SDA); Serial.print(" SCL="); Serial.print(SCL); Serial.println("):");
+  uint8_t n = 0;
+  for (uint8_t a = 0x08; a < 0x78; ++a) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) {
+      ++n;
+      Serial.print("  found 0x"); Serial.print(a, HEX);
+      if (a == ADDR_RIGHT) Serial.print("  <- RIGHT PCA9685");
+      if (a == ADDR_LEFT)  Serial.print("  <- LEFT PCA9685");
+      if (a == 0x70)       Serial.print("  (PCA9685 all-call)");
+      Serial.println();
+    }
+  }
+  if (n == 0) Serial.println("  nothing answered — check SDA/SCL wiring and driver power");
 }
 
 void handleMainMenu() {
@@ -460,6 +479,7 @@ void handleMainMenu() {
         printMainMenu();
         break;
       }
+      case 'C': case 'c': i2cScan(); break;
       case '?': printMainMenu(); break;
       default:  break;
     }
