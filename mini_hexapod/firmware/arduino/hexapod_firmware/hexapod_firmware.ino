@@ -461,7 +461,7 @@ void printMainMenu() {
   Serial.println("  B  bluetooth controller pairing (stub)");
   Serial.println("  L  joint travel-limit calibration (jog to each stop)");
   Serial.println("  P  policy stream (host PC sends joint targets over serial)");
-  Serial.println("  U  upload saved calibration from the host (tools/mini_push_config.py)");
+  Serial.println("  U  upload a saved calibration from the host");
   Serial.println("  X  export full config as C++");
   Serial.println("  J  export full config as JSON (for the simulator)");
   Serial.println("  C  I2C scan (are both PCA9685 boards answering?)");
