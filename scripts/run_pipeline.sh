@@ -16,6 +16,7 @@
 #   STYLE_WEIGHT    λ_style                            (default 1.0)
 #   PY              python interpreter                 (default ~/.venv-mjx/bin/python)
 #   STAGES          subset to run, e.g. "priors bc"    (default "priors bc amp")
+#   CMD_MASK        cmd slots sampled in every stage (default paper_stance; paper_tilt = + pitch/roll)
 #   DR_SCALE        dynamics domain randomization 0..1 (default 0 = nominal physics)
 #   LOG_STD         exploration log-std baked by BC (default -4.0; joint-target policies: -6)
 #   LEARNING_RATE   PPO learning rate (default 3e-4; joint-target policies: 1e-4)
@@ -65,6 +66,7 @@ AMP_STEPS="${AMP_STEPS:-50000000}"
 STYLE_WEIGHT="${STYLE_WEIGHT:-1.0}"
 PY="${PY:-$HOME/.venv-mjx/bin/python}"
 STAGES="${STAGES:-priors bc amp}"
+CMD_MASK="${CMD_MASK:-paper_stance}"   # paper_tilt adds pitch/roll (mini web controller tilt stick)
 DR_SCALE="${DR_SCALE:-0}"
 NICE="${NICE:-10}"
 MEM_BUDGET_MB="${MEM_BUDGET_MB:-10000}"
@@ -117,7 +119,7 @@ run_stage() {
   return "$rc"
 }
 
-log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' action_space=$ACTION_SPACE log_std=${LOG_STD:-default} lr=${LEARNING_RATE:-default} entropy=${ENTROPY_COST:-default} dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
+log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' cmd_mask=$CMD_MASK action_space=$ACTION_SPACE log_std=${LOG_STD:-default} lr=${LEARNING_RATE:-default} entropy=${ENTROPY_COST:-default} dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
 log "priors=$PRIORS  bc_dir=$BC_DIR  amp_restore=$AMP_RESTORE  amp_restore_disc=${AMP_RESTORE_DISC:-<fresh>}"
 "$PY" -c "import jax; print('  jax devices:', jax.devices())"
 
@@ -127,7 +129,7 @@ if want priors; then
   else
     log "STAGE 1/3  scaffold priors → $PRIORS"
     run_stage "logs/stdout/priors_${ROBOT}_${TAG}.log" \
-        "$PY" -u amp/prior_data.py --cmd-mask paper_stance --n-steps "$PRIOR_STEPS" \
+        "$PY" -u amp/prior_data.py --cmd-mask "$CMD_MASK" --n-steps "$PRIOR_STEPS" \
         --out "$PRIORS"
   fi
 fi
@@ -138,7 +140,7 @@ if want bc; then
   else
     log "STAGE 2/3  BC pretrain → $BC_DIR"
     run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
-        "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space "$ACTION_SPACE" \
+        "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask "$CMD_MASK" --action-space "$ACTION_SPACE" \
         ${LOG_STD:+--log-std "$LOG_STD"} ${VALUE_EPOCHS:+--value-epochs "$VALUE_EPOCHS"} --out-dir "$BC_DIR"
   fi
 fi
@@ -148,7 +150,7 @@ if want amp; then
     log "AMP run complete → skip (checkpoints/$RUN)"
   else
     log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE, isolation=$SEGMENT_ISOLATION)"
-    amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space "$ACTION_SPACE"
+    amp_common=(--priors "$PRIORS" --cmd-mask "$CMD_MASK" --action-space "$ACTION_SPACE"
                 --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
                 ${LEARNING_RATE:+--learning-rate "$LEARNING_RATE"} ${ENTROPY_COST:+--entropy-cost "$ENTROPY_COST"}
                 ${CLIP_EPS:+--clipping-epsilon "$CLIP_EPS"} ${NUM_ENVS:+--num-envs "$NUM_ENVS"}

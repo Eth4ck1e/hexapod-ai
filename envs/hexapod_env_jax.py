@@ -62,6 +62,9 @@ CMD_MASKS = {
     # the D-pad axes. Pitch/roll/shifts still deferred. Priors must span
     # height/width so the discriminator stays cmd-invariant on those axes.
     "paper_stance": jnp.array([1, 1, 1, 0, 0, 1, 1, 0, 0], dtype=jnp.float32),
+    # paper_tilt: paper_stance + pitch + roll (2026-11-20, mini on-board controller:
+    # the phone's second stick tilts the body). Shifts still off.
+    "paper_tilt": jnp.array([1, 1, 1, 1, 1, 1, 1, 0, 0], dtype=jnp.float32),
 }
 
 # v20 (2026-05-10) — height-conditional stance width envelope. Coefficients

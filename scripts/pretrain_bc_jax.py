@@ -301,7 +301,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--out-dir",    type=str, default=str(OUT_DIR))
     parser.add_argument("--cmd-mask",   type=str, default="stage3",
-                        choices=["stage1", "stage2", "stage3", "paper", "paper_stance"],
+                        choices=["stage1", "stage2", "stage3", "paper", "paper_stance", "paper_tilt"],
                         help="cmd-slot curriculum stage to use during demo "
                              "collection — match this to the train_jax.py mask")
     parser.add_argument("--action-space", type=str, default="joint",

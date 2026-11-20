@@ -183,17 +183,34 @@ def main() -> None:
             "trained_speed_frac": [float(TRAINED_SPEED_MIN_FRAC), float(TRAINED_SPEED_MAX_FRAC)],
         },
     }
-    # Check the stance formula against the scaffold at zero velocity over the envelope.
+    # Tilt: the normaliser tells us whether pitch/roll varied in training (std 1e-6 = never).
+    from envs.hexapod_env_jax import make_env_params
+    from envs.obs_layout import obs_slots as _slots
+    cmd0 = sum(OBS_SLOT_DIMS[k] for k in _slots(variant)[:list(_slots(variant)).index("cmd")])
+    tilt_trained = bool(obs_std[cmd0 + 3] > 1e-3 and obs_std[cmd0 + 4] > 1e-3)
+    rng_cmd = np.asarray(make_env_params(str(_ROOT / model_path), cmd_mask_name="paper_stance").cmd_sample_ranges)
+    pitch_max = float(rng_cmd[3, 1]) if tilt_trained else 0.0
+    roll_max = float(rng_cmd[4, 1]) if tilt_trained else 0.0
+    meta["stance"]["tilt_trained"] = tilt_trained
+    meta["stance"]["pitch_max_rad"] = pitch_max
+    meta["stance"]["roll_max_rad"] = roll_max
+    meta["stance"]["coxa_pos_body_m"] = [[float(v) for v in row] for row in ctrl._coxa_pos_body]
+    meta["stance"]["leg_yaw_cos_sin"] = [[float(c), float(s_)] for c, s_ in zip(ctrl._yaw_c, ctrl._yaw_s)]
+    print(f"tilt in training data: {tilt_trained} (pitch ±{np.degrees(pitch_max):.0f}°, roll ±{np.degrees(roll_max):.0f}°)")
+    # Check the stance formula (with tilt) against the scaffold at zero velocity over the envelope.
     from gait.controller import _ik_raw_batch
     worst = 0.0
     for dh in np.linspace(env.dh_min, env.dh_max, 7):
         lo, hi = env.safe_dw_range(dh)
         for dw in np.linspace(lo, hi, 5):
-            cmd = np.zeros(9); cmd[5] = dh; cmd[6] = dw
-            ref_j, _ = ctrl.predict_with_feet(cmd, 0.0)
-            rest = ctrl.FOOT_REST_COXA.copy(); rest[:, 0] += dw; rest[:, 2] += dh
-            mine = (ctrl._joint_signs_array * _ik_raw_batch(rest, ctrl.L1, ctrl.L2, ctrl.L3) + ctrl.LEG_OFFSETS).ravel()
-            worst = max(worst, float(np.abs(mine - ref_j).max()))
+            for pitch, roll in ((0.0, 0.0), (0.1, -0.12), (-0.08, 0.15)):
+                cmd = np.zeros(9); cmd[3] = pitch; cmd[4] = roll; cmd[5] = dh; cmd[6] = dw
+                ref_j, _ = ctrl.predict_with_feet(cmd, 0.0)
+                rest = ctrl.FOOT_REST_COXA.copy(); rest[:, 0] += dw; rest[:, 2] += dh
+                if pitch or roll:
+                    rest = ctrl._apply_tilt(rest, pitch, roll)
+                mine = (ctrl._joint_signs_array * _ik_raw_batch(rest, ctrl.L1, ctrl.L2, ctrl.L3) + ctrl.LEG_OFFSETS).ravel()
+                worst = max(worst, float(np.abs(mine - ref_j).max()))
     print(f"stance formula vs scaffold at zero velocity: max |Δ| {worst:.2e} rad")
     assert worst < 1e-9
 
@@ -228,11 +245,15 @@ def main() -> None:
          f"#define POLICY_DW_MAX_INTERCEPT {env.max_dw_intercept:.8e}f", f"#define POLICY_DW_MAX_SLOPE {env.max_dw_slope:.8e}f",
          f"#define POLICY_DW_MIN_INTERCEPT {env.min_dw_intercept:.8e}f", f"#define POLICY_DW_MIN_SLOPE {env.min_dw_slope:.8e}f",
          f"#define POLICY_L1 {ctrl.L1:.8e}f", f"#define POLICY_L2 {ctrl.L2:.8e}f", f"#define POLICY_L3 {ctrl.L3:.8e}f",
+         f"#define POLICY_PITCH_MAX {pitch_max:.8e}f   // 0 = tilt was not in the training data: keep pitch/roll at 0",
+         f"#define POLICY_ROLL_MAX {roll_max:.8e}f",
          carr("POLICY_OBS_MEAN", obs_mean), carr("POLICY_OBS_STD", obs_std),
          carr("POLICY_NEUTRAL_POSE", meta["neutral_pose_rad"]),
          carr("POLICY_FOOT_REST_COXA", ctrl.FOOT_REST_COXA),      # [leg][xyz] m, sim leg order
          carr("POLICY_LEG_OFFSETS", ctrl.LEG_OFFSETS),            # [leg][joint] rad
-         carr("POLICY_JOINT_SIGNS", ctrl._joint_signs_array)]     # [leg][joint]
+         carr("POLICY_JOINT_SIGNS", ctrl._joint_signs_array),     # [leg][joint]
+         carr("POLICY_COXA_POS_BODY", ctrl._coxa_pos_body),      # [leg][xyz] m, body frame
+         carr("POLICY_LEG_YAW_C", ctrl._yaw_c), carr("POLICY_LEG_YAW_S", ctrl._yaw_s)]
     for i, (W, b) in enumerate(zip(Ws, bs)):
         h.append(carr(f"POLICY_W{i}", W))   # row-major [in][out]
         h.append(carr(f"POLICY_B{i}", b))
