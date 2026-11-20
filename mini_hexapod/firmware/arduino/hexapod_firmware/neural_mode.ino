@@ -26,6 +26,7 @@ constexpr float NC_FADE_S               = 0.5f;    // network <-> standing pose 
 constexpr float NC_STANCE_RAMP_M_S      = 0.020f;  // height / width changes
 constexpr float NC_DEFAULT_DURATION_S   = 5.0f;
 constexpr float NC_SWEEP_DEFAULT_S      = 12.0f;
+constexpr float NC_TILT_FRAC            = 0.6f;    // usable share of the trained pitch/roll range
 
 struct NeuralCtl {
   float vel[3], vel_now[3];                 // commanded / ramped (vx, vy, wz)
@@ -276,8 +277,10 @@ static void ncWeb(float t) {
   if (web.wd) nc.dw_goal += NC_STANCE_RAMP_M_S * dtm;
   if (web.nr) nc.dw_goal -= NC_STANCE_RAMP_M_S * dtm;
   nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal);
-  nc.pitch_goal = nc_clampf(web.ry, -1.0f, 1.0f) * POLICY_PITCH_MAX;   // stick up = nose up
-  nc.roll_goal  = nc_clampf(web.rx, -1.0f, 1.0f) * POLICY_ROLL_MAX;    // stick right = right side down (roll+ = left up)
+  // Tilt stick spans 60 % of the trained range: the clone matches the scaffold there,
+  // while the outer corners (full tilt + extreme stance) still cost it ~3 % falls in sim.
+  nc.pitch_goal = nc_clampf(web.ry, -1.0f, 1.0f) * POLICY_PITCH_MAX * NC_TILT_FRAC;   // stick up = nose up
+  nc.roll_goal  = nc_clampf(web.rx, -1.0f, 1.0f) * POLICY_ROLL_MAX * NC_TILT_FRAC;    // stick right = right side down (roll+ = left up)
   bool stance_btn = web.up || web.dn || web.wd || web.nr || web.rx != 0.0f || web.ry != 0.0f;
   if (stance_btn && (nc.resting || nc.rest_pending || nc.paused)) ncWake(t);
   float mag = hypotf(web.lx, web.ly), vel[3] = {0, 0, 0};
