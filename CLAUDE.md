@@ -573,7 +573,12 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   `tools/export_policy_weights.py` → `tools/package_submission.py`. **p6 (2026-11-20 09:29,
   BC only, 3 min)**: = lifted scaffold in `media/plots/pure_p6_eval.csv` (64 paired eps, dr 0/1.0:
   0 % falls, r_lin 0.998/0.997 vs 0.998/0.998); femur swing 18.7° vs p4's 12.9° (scaffold 19.9°).
-  **Ship p6**: `checkpoints/bc_pretrained_jax_mini_hexapod_pure_p6/params.pkl`; package rebuilt.
+  p6 on the bot (2026-11-20 ~09:45): walks fine but feet still drag/slide — the 9 g servos lag the
+  commanded arc, so the commanded apex must exceed the apex you want to see → `lift_scale` 2.0
+  (30 mm, max joint excursion 27° of the 46° output range), re-cloned as **p7** (10:04, = scaffold:
+  0 % falls, r_lin 0.998/0.997, femur swing 26.4° vs scaffold 28.2°, `media/plots/pure_p7_eval.csv`).
+  **Ship p7**: `checkpoints/bc_pretrained_jax_mini_hexapod_pure_p7/params.pkl`; package rebuilt.
+  Step height is NOT a runtime command (cmd has no lift slot): changing it = profile edit + re-clone.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
