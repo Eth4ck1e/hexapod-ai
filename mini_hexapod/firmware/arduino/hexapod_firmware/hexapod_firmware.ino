@@ -150,14 +150,18 @@ uint16_t usToTicks(uint16_t us) {
 
 bool isWS(char c) { return c == '\n' || c == '\r' || c == ' ' || c == '\t'; }
 
+// A line ends on LF or CR (screen/minicom send CR only; the Arduino monitor sends
+// LF or CRLF). The LF of a CRLF pair is swallowed so it does not produce a blank line.
 String readLine(unsigned long timeout_ms) {
   String s;
   unsigned long start = millis();
   while (millis() - start < timeout_ms) {
     if (Serial.available()) {
       char c = Serial.read();
-      if (c == '\n') return s;
-      if (c == '\r') continue;
+      if (c == '\r' || c == '\n') {
+        if (c == '\r') { delay(2); if (Serial.available() && Serial.peek() == '\n') Serial.read(); }
+        return s;
+      }
       s += c;
     }
     delay(2);
