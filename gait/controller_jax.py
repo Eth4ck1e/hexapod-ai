@@ -42,6 +42,7 @@ class GaitParams(NamedTuple):
     max_yaw_rate:      jnp.ndarray   # () scalar
     gait_period:       jnp.ndarray   # () scalar
     path_radius:       jnp.ndarray   # () scalar  (R for canonical_path)
+    lift_scale:        jnp.ndarray   # () scalar  swing apex = lift_scale · R
     coxa_length:       jnp.ndarray   # () scalar  link lengths from RobotProfile
     femur_length:      jnp.ndarray   # () scalar
     tibia_length:      jnp.ndarray   # () scalar
@@ -83,6 +84,7 @@ def build_params(model_path: str = None,
         max_yaw_rate     = jnp.asarray(ctrl.MAX_YAW_RATE,      dtype=dtype),
         gait_period      = jnp.asarray(ctrl.gait_period,       dtype=dtype),
         path_radius      = jnp.asarray(ctrl.path_radius,       dtype=dtype),
+        lift_scale       = jnp.asarray(ctrl.lift_scale,        dtype=dtype),
         coxa_length      = jnp.asarray(ctrl.L1,                dtype=dtype),
         femur_length     = jnp.asarray(ctrl.L2,                dtype=dtype),
         tibia_length     = jnp.asarray(ctrl.L3,                dtype=dtype),
@@ -230,7 +232,7 @@ def _compute_foot_targets_coxa(params, cmd, t):
     spin_x = (cx + (cs * rx - ss * ry)) - rest[:, 0]
     spin_y = (cy + (ss * rx + cs * ry)) - rest[:, 1]
 
-    lift = pz_arr * gait_active
+    lift = pz_arr * gait_active * params.lift_scale
 
     # Combine. When gait_active ≈ 0, trans/spin/lift all collapse to ~0 and
     # we recover `rest` to within float precision.

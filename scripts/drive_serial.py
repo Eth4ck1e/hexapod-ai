@@ -188,6 +188,7 @@ class ConsoleSource:
         forward | back | left | right | fl | fr | bl | br   [speed 0-1] [for SEC]
         spin left | spin right                              [scale 0-1] [for SEC]
         arc left | arc right                                [speed 0-1] [for SEC]
+        sweep                      heading turns 0→360° while walking   [speed] [for SEC=12]
         up MM | down MM            stance height, persistent, ramped, no time limit
         wide MM | narrow MM        stance width, persistent, ramped
         speed F                    default speed fraction for following moves
@@ -233,6 +234,7 @@ class ConsoleSource:
         self.speed_frac = speed_frac or DEFAULT_SPEED_FRAC
         self.band = (TRAINED_SPEED_MIN_FRAC, TRAINED_SPEED_MAX_FRAC)
         self.vel = np.zeros(3, dtype=np.float32)      # active move (vx, vy, wz) — the target
+        self.sweep = None                             # (speed, dur) while a heading sweep runs
         self._vel_now = np.zeros(3, dtype=np.float32) # ramped value actually commanded
         self.move_end = -1.0                          # sim time the move stops
         self.move_label = ""
@@ -294,6 +296,7 @@ class ConsoleSource:
         dur = self.default_duration if dur is None else dur
         self.move_end = t + dur
         self.move_label = label
+        self.sweep = None
         print(f"  ▶ {label} for {dur:g} s")
 
     def handle(self, line: str, t: float) -> None:
@@ -348,6 +351,13 @@ class ConsoleSource:
                     from demo_phases import _arc
                     c = _arc(self.ctrl, frac if frac is not None else self.speed_frac, 0.5, sign)
                     self._start_move(c[:3], f"arc {toks[1]}", t, dur)
+            elif verb == "sweep":
+                frac, dur = self._parse_tail(toks[1:])
+                frac = min(max(frac if frac is not None else self.speed_frac, self.band[0]), self.band[1])
+                dur = 12.0 if dur is None else dur
+                speed = self.ctrl.MAX_SPEED * frac
+                self._start_move([speed, 0.0, 0.0], f"heading sweep 0→360° {frac:.2f}×", t, dur)
+                self.sweep = (speed, dur)             # heading = 2π·(t - start)/dur, from the move start
             elif verb in self.HEADINGS:
                 frac, dur = self._parse_tail(toks[1:])
                 frac = min(max(frac if frac is not None else self.speed_frac, self.band[0]), self.band[1])
@@ -423,6 +433,10 @@ class ConsoleSource:
         moving = self._hold_until <= t < self.move_end
         self._gain = min(1.0, self._gain + dt / self.FADE_S) if moving else max(0.0, self._gain - dt / self.FADE_S)
         cmd = np.zeros(9, dtype=np.float32)
+        if moving and self.sweep is not None:
+            speed, dur = self.sweep
+            h = 2.0 * math.pi * (t - (self.move_end - dur)) / dur
+            self.vel = np.array([speed * math.cos(h), speed * math.sin(h), 0.0], dtype=np.float32)
         target = self.vel if moving else np.zeros(3, dtype=np.float32)
         # Linear ramp per axis at (full-scale / VEL_RAMP_S).
         scale = np.array([self.ctrl.MAX_SPEED, self.ctrl.MAX_SPEED, self.ctrl.MAX_YAW_RATE], dtype=np.float32)

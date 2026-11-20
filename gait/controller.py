@@ -232,6 +232,7 @@ class Controller:
             model_path = str(_PROJECT_ROOT / profile.model_path)
         self.DEFAULT_GAIT_PERIOD  = profile.gait_period
         self.DEFAULT_PATH_RADIUS  = profile.path_radius
+        self.lift_scale           = profile.lift_scale
         self.DEFAULT_PATH_RES     = profile.path_res
         self.DEFAULT_STANCE_WIDTH = profile.stance_width
         self.MIN_TURN_RADIUS      = profile.min_turn_radius
@@ -673,8 +674,9 @@ class Controller:
             spin_x = 0.0
             spin_y = 0.0
 
-        # Lift scales with gait_active (suppress lift when no motion commanded).
-        lift = pz_arr * gait_active                                   # (6,)
+        # Lift scales with gait_active (suppress lift when no motion commanded)
+        # and the profile's lift_scale (swing apex = lift_scale · path_radius).
+        lift = pz_arr * gait_active * self.lift_scale                 # (6,)
 
         feet = np.empty_like(rest)
         feet[:, 0] = rest[:, 0] + trans_x + spin_x

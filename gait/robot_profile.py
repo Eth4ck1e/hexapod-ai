@@ -83,6 +83,7 @@ class RobotProfile:
     gait_period: float = 0.45             # s per full tripod cycle
     path_radius: float = 0.040            # m, half stride
     path_res: int = 100
+    lift_scale: float = 1.0               # swing apex = lift_scale · path_radius (1.0 = semicircle)
     stance_width: float = 0.015           # m outward per foot at neutral
     min_turn_radius: float = 0.350        # m — below: pure spin
     max_turn_radius: float = 0.755        # m — above: pure translate
@@ -282,7 +283,9 @@ MINI_HEXAPOD = RobotProfile(
     # (30 mm step, 1.5 s period) toward something brisker; calibrate with
     # tools/calibrate_scaffold_speed.py once the MJCF is trusted.
     gait_period=0.80,
-    path_radius=0.015,                      # 30 mm stride, 15 mm lift
+    path_radius=0.015,                      # 30 mm stride, 15 mm lift × lift_scale
+    lift_scale=1.4,                         # 21 mm apex: 15 mm barely cleared the table on the
+                                            # real bot (2026-11-20); re-clone the policy after changing
     path_res=100,
     stance_width=0.005,
     # Turn-radius window scaled by body size (~0.45× PhantomX).

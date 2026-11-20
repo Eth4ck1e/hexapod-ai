@@ -6,6 +6,11 @@ back
 wait 1
 left for 3
 right for 3
+fl for 3
+br for 3
+fr for 3
+bl for 3
+sweep for 12
 spin left for 4
 spin right for 4
 arc left for 4
