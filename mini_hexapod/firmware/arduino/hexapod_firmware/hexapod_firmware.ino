@@ -13,6 +13,7 @@
 //   7. L  limits    — per-joint travel-range calibration (jog to each stop)
 //   8. P  policy stream — host PC streams 18 joint targets at ~50 Hz over
 //                     serial (scripts/drive_serial.py runs scaffold + policy)
+//   U  upload    — host pushes a saved calibration (tools/mini_push_config.py)
 //   X  export    — dump full config as C++
 //   J  export    — dump full config as JSON (feeds the simulator profile)
 //   R  reset NVS — factory defaults (confirm)
@@ -90,6 +91,26 @@ float R_HOME, D_HOME;
 // =========================== CALIBRATION ===========================
 uint16_t trim_us[6][3];
 int8_t   SIGN[6][3];
+// Calibration of the physical bot, pulled from the original XIAO ESP32-C3's NVS
+// on 2026-11-19 (mini_hexapod/calibration/2026-11-19_c3.json). Used for any
+// joint that has no value in NVS, so a freshly flashed board starts calibrated;
+// `U` upload / `T` trim / `S` sign still override per joint in NVS.
+const uint16_t DEFAULT_TRIM_US[6][3] = {
+  /* FR */ {1434, 1390, 1434},
+  /* MR */ {1500, 1489, 1379},
+  /* RR */ {1456, 1500, 1434},
+  /* FL */ {1467, 1665, 1445},
+  /* ML */ {1555, 1357, 1390},
+  /* RL */ {1401, 1522, 1500},
+};
+const int8_t DEFAULT_SIGN[6][3] = {
+  /* FR */ {-1, -1, -1},
+  /* MR */ {-1, +1, +1},
+  /* RR */ {-1, +1, +1},
+  /* FL */ {-1, +1, +1},
+  /* ML */ {-1, -1, -1},
+  /* RL */ {-1, -1, -1},
+};
 float    HOME_KIN_ANGLE[3] = {0, 0, 0};
 // Travel limits measured in range mode: pulse width where the joint binds in
 // each direction. 0 = never calibrated. Kinematic angle at a pulse width:
@@ -111,7 +132,7 @@ const float   TRIPOD_OFFS[6] = {0, 0, 0, 0.5f, 0.5f, 0.5f};
 // =========================== STATE MACHINE ===========================
 enum Mode {
   MODE_MAIN, MODE_GEOMETRY, MODE_TRIM, MODE_SIGN,
-  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON, MODE_STREAM
+  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON, MODE_STREAM, MODE_UPLOAD
 };
 Mode current_mode = MODE_MAIN;
 
@@ -297,7 +318,7 @@ void loadTrims() {
   for (uint8_t l = 0; l < 6; ++l) {
     for (uint8_t j = 0; j < 3; ++j) {
       char k[16]; snprintf(k, 16, "l%d_j%d", l, j);
-      trim_us[l][j] = prefs.getUShort(k, SERVO_CTR_US);
+      trim_us[l][j] = prefs.getUShort(k, DEFAULT_TRIM_US[l][j]);
     }
   }
   prefs.end();
@@ -316,7 +337,7 @@ void loadSigns() {
   for (uint8_t l = 0; l < 6; ++l) {
     for (uint8_t j = 0; j < 3; ++j) {
       char k[16]; snprintf(k, 16, "l%d_j%d", l, j);
-      SIGN[l][j] = (int8_t)prefs.getChar(k, (int8_t)+1);
+      SIGN[l][j] = (int8_t)prefs.getChar(k, DEFAULT_SIGN[l][j]);
     }
   }
   prefs.end();
@@ -403,6 +424,7 @@ void printMainMenu() {
   Serial.println("  B  bluetooth controller pairing (stub)");
   Serial.println("  L  joint travel-limit calibration (jog to each stop)");
   Serial.println("  P  policy stream (host PC sends joint targets over serial)");
+  Serial.println("  U  upload saved calibration from the host (tools/mini_push_config.py)");
   Serial.println("  X  export full config as C++");
   Serial.println("  J  export full config as JSON (for the simulator)");
   Serial.println("  R  reset all NVS to defaults (confirm)");
@@ -423,6 +445,7 @@ void handleMainMenu() {
       case 'B': case 'b': current_mode = MODE_BT;       return;
       case 'L': case 'l': current_mode = MODE_RANGE;    return;
       case 'P': case 'p': current_mode = MODE_STREAM;   return;
+      case 'U': case 'u': current_mode = MODE_UPLOAD;   return;
       case 'X': case 'x': current_mode = MODE_EXPORT;   return;
       case 'J': case 'j': current_mode = MODE_JSON;     return;
       case 'R': case 'r': {
@@ -1210,6 +1233,121 @@ void runStreamMode() {
 }
 
 // ====================================================================
+// =                       CONFIG UPLOAD MODE                          =
+// ====================================================================
+// The host pushes a saved calibration (tools/mini_push_config.py sends the
+// JSON written by tools/mini_pull_config.py or the `J` export). One setting
+// per line; every line is answered with "ok ..." or "err ...":
+//   T <leg> <joint> <us>              trim at the L-pose
+//   S <leg> <joint> <+1|-1>           sign
+//   R <leg> <joint> <lo_us> <hi_us>   travel limits (0 0 clears)
+//   G <key> <value>                   geometry: l2 l3 r_home d_home cx<l> cy<l> cz<l> aa<l>  (mm / rad)
+//   W <len_mm> <ht_mm> <period_ms>    gait parameters
+//   E                                 end: save geometry, recompute home angles, back to menu
+// <leg> = FR MR RR FL ML RL or 0..5 (firmware order); <joint> = 0..2 or COXA FEMUR KNEE.
+// Everything goes to NVS as it arrives. No servo moves.
+constexpr unsigned long UPLOAD_IDLE_MS = 60000;
+
+int parseLegToken(const String& tok) {
+  if (tok.length() == 1 && isDigit(tok[0])) { int l = tok[0] - '0'; return l < 6 ? l : -1; }
+  return findLeg(tok);
+}
+
+int parseJointToken(const String& tok) {
+  if (tok.length() == 1 && isDigit(tok[0])) { int j = tok[0] - '0'; return j < 3 ? j : -1; }
+  for (uint8_t j = 0; j < 3; ++j) if (tok == JOINT_NAMES[j]) return j;
+  return -1;
+}
+
+// Split on spaces into at most 5 tokens; returns the count.
+uint8_t splitTokens(const String& line, String out[5]) {
+  uint8_t n = 0;
+  int i = 0;
+  while (i < (int)line.length() && n < 5) {
+    while (i < (int)line.length() && line[i] == ' ') ++i;
+    int j = i;
+    while (j < (int)line.length() && line[j] != ' ') ++j;
+    if (j > i) out[n++] = line.substring(i, j);
+    i = j;
+  }
+  return n;
+}
+
+bool uploadGeometry(const String& key, float v) {
+  if (key == "l2") L2 = v; else if (key == "l3") L3 = v;
+  else if (key == "r_home") R_HOME = v; else if (key == "d_home") D_HOME = v;
+  else if (key.length() == 3 && isDigit(key[2]) && key[2] - '0' < 6) {
+    uint8_t l = key[2] - '0';
+    String k = key.substring(0, 2);
+    if (k == "cx") COXA_X[l] = v; else if (k == "cy") COXA_Y[l] = v;
+    else if (k == "cz") COXA_Z[l] = v; else if (k == "aa") AXIS_RAD[l] = v;
+    else return false;
+  } else return false;
+  return true;
+}
+
+void runUploadMode() {
+  Serial.println();
+  Serial.println("=== CONFIG UPLOAD ===");
+  Serial.println("ready (T/S/R/G/W lines, E to finish, m to abort)");
+  bool geom_dirty = false;
+  unsigned long last_line = millis();
+  while (current_mode == MODE_UPLOAD) {
+    String line = readLine(1000);
+    line.trim();
+    if (line.length() == 0) {           // blank line (e.g. the newline after 'U') or 1 s of silence
+      if (millis() - last_line > UPLOAD_IDLE_MS) { Serial.println("idle, leaving upload mode"); current_mode = MODE_MAIN; return; }
+      continue;
+    }
+    last_line = millis();
+    String tok[5];
+    uint8_t n = splitTokens(line, tok);
+    char head = tok[0][0];
+    if (head == 'm' || head == 'E' || head == 'e') {
+      if (geom_dirty) saveGeometry();
+      computeHomeKinAngles();
+      Serial.print("ok end  home_kin_angle_rad=[");
+      for (uint8_t j = 0; j < 3; ++j) { Serial.print(HOME_KIN_ANGLE[j], 5); if (j < 2) Serial.print(", "); }
+      Serial.println("]");
+      current_mode = MODE_MAIN;
+      return;
+    }
+    if ((head == 'T' || head == 'S' || head == 'R') && n >= 4) {
+      int l = parseLegToken(tok[1]), j = parseJointToken(tok[2]);
+      if (l < 0 || j < 0) { Serial.print("err leg/joint: "); Serial.println(line); continue; }
+      if (head == 'T') {
+        long us = tok[3].toInt();
+        if (us < SERVO_MIN_US || us > SERVO_MAX_US) { Serial.print("err trim range: "); Serial.println(line); continue; }
+        saveTrim(l, j, (uint16_t)us);
+      } else if (head == 'S') {
+        long sg = tok[3].toInt();
+        if (sg != 1 && sg != -1) { Serial.print("err sign: "); Serial.println(line); continue; }
+        saveSign(l, j, (int8_t)sg);
+      } else {
+        if (n < 5) { Serial.print("err need lo hi: "); Serial.println(line); continue; }
+        saveRange(l, j, (uint16_t)tok[3].toInt(), (uint16_t)tok[4].toInt());
+      }
+      Serial.print("ok "); Serial.println(line);
+      continue;
+    }
+    if (head == 'G' && n >= 3) {
+      if (!uploadGeometry(tok[1], tok[2].toFloat())) { Serial.print("err geometry key: "); Serial.println(line); continue; }
+      geom_dirty = true;
+      Serial.print("ok "); Serial.println(line);
+      continue;
+    }
+    if (head == 'W' && n >= 4) {
+      step_length = tok[1].toFloat(); step_height = tok[2].toFloat();
+      step_period_ms = (unsigned long)tok[3].toInt();
+      saveGait();
+      Serial.print("ok "); Serial.println(line);
+      continue;
+    }
+    Serial.print("err syntax: "); Serial.println(line);
+  }
+}
+
+// ====================================================================
 // =                        JSON EXPORT MODE                           =
 // ====================================================================
 // One JSON object between BEGIN_JSON / END_JSON. Copy it into
@@ -1227,7 +1365,7 @@ void runJsonMode() {
   Serial.println();
   Serial.println("BEGIN_JSON");
   Serial.println("{");
-  Serial.println("  \"firmware\": \"mini_hexapod unified v0.2\",");
+  Serial.println("  \"firmware\": \"mini_hexapod unified v0.3\",");
   Serial.print("  \"servo\": {\"min_us\": "); Serial.print(SERVO_MIN_US);
   Serial.print(", \"max_us\": "); Serial.print(SERVO_MAX_US);
   Serial.print(", \"us_per_deg\": "); Serial.print(US_PER_DEG, 4);
@@ -1363,7 +1501,7 @@ void setup() {
   delay(1000);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println("  mini_hexapod unified firmware  v0.2");
+  Serial.println("  mini_hexapod unified firmware  v0.3");
   Serial.println("==========================================");
 
   Wire.begin();
@@ -1399,5 +1537,6 @@ void loop() {
     case MODE_RANGE:    runRangeMode(); break;
     case MODE_JSON:     runJsonMode(); break;
     case MODE_STREAM:   runStreamMode(); break;
+    case MODE_UPLOAD:   runUploadMode(); break;
   }
 }

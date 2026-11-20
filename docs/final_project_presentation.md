@@ -58,8 +58,10 @@ corresponding run; everything else is already true today.
 
 Prep the night before:
 
-1. Flash firmware v0.2 (`mini_hexapod/firmware/arduino/hexapod_firmware`), confirm
-   trims/limits load from NVS (`p` prints them).
+1. Flash firmware v0.3 onto the S3: `bash mini_hexapod/firmware/flash.sh s3 /dev/cu.usbmodem*`.
+   It boots with the May calibration baked in (recovered from the C3 on 2026-11-19);
+   `J` prints what the board holds, `python tools/mini_push_config.py --port … mini_hexapod/calibration/<latest>.json`
+   re-pushes a saved calibration with readback check.
 2. Battery charged; USB cable that carries data; know the serial port
    (`ls /dev/cu.usbmodem*` on the Mac, `COMx` on Windows).
 3. Dry run without the bot:
@@ -68,10 +70,13 @@ Prep the night before:
 On stage, in this order (each step is a fallback for the next):
 
 1. **Firmware walk** (`w` in the menu) — proves the hardware. Zero software risk.
-2. **Scaffold over serial** — `drive_serial.py --port … --source hold --cmd 0.04 0 0`
-   (no `--params`). Proves the tether + kinematics convention.
-3. **Policy over serial** — add `--params checkpoints/amp_to_mini_hexapod_v2h/iter10/final/params.pkl`,
-   `--source gamepad` if the 8BitDo is paired, else `--source demo`.
+2. **Scaffold over serial** — `drive_serial.py --port … --source console` (no `--params`),
+   then type `forward`, `left`, `spin right`, `up 10` … Each move runs 5 s and the bot
+   stands still in between, so it stays on the table. Proves the tether + kinematics.
+3. **Policy over serial** — same console with
+   `--params checkpoints/amp_to_mini_hexapod_v2h/iter10/final/params.pkl`; use
+   `--script docs/demo_script.txt` for the rehearsed sequence, `--source gamepad` if the
+   8BitDo is paired.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
 

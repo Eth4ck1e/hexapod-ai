@@ -218,7 +218,8 @@ In `envs/hexapod_env_jax.py:_compute_reward`. **Paper Table I (Liu et al. 2511.0
 | `scripts/train_jax_amp.py` | Brax PPO + AMP training. `--partition-disc`, `--knn-k`, `--style-weight`, `--recovery-curriculum` (shelved). |
 | `scripts/pretrain_bc_jax.py` | BC pretraining. Bakes `log_std=-4.0`. Default `n_envs=2048` for VRAM fit. |
 | `scripts/chain_train.py` | Chain orchestrator + shared session config (`BASE_NAME`, `CMD_MASK`, etc). Robot via `HEXAPOD_ROBOT`. |
-| `scripts/drive_serial.py` | **Tethered deployment**: host-side scaffold + policy → `J a0..a17` frames over serial to the mini firmware's `P` mode. `--dry-run`, `--source demo|hold|gamepad`, `--log-csv`. |
+| `scripts/drive_serial.py` | **Tethered deployment**: host-side scaffold + policy → `J a0..a17` frames over serial to the mini firmware's `P` mode. `--dry-run`, `--source demo|hold|gamepad|console` (+ `--script`), `--log-csv`. |
+| `tools/mini_pull_config.py` / `mini_push_config.py` / `nvs_dump.py` | Mini calibration round-trip: pull (`J` export, or raw NVS dump for stage sketches) → JSON → push through firmware menu `U` with readback diff. `mini_hexapod/firmware/flash.sh s3\|c3 PORT` compiles + flashes with the IDE's bundled arduino-cli. |
 | `scripts/run_pipeline.sh` | **One-shot v27 recipe for one robot**: scaffold priors → BC pretrain → AMP-PPO (`HEXAPOD_ROBOT=mini_hexapod TAG=v1 bash scripts/run_pipeline.sh`). Skips stages whose artifacts exist. Artifacts: `amp_priors_<robot>_<tag>.npz`, `bc_pretrained_jax_<robot>_<tag>/`, `amp_to_<robot>_<tag>/`. Knobs: `DR_SCALE`, `STAGES`, `PRIORS`/`BC_DIR`/`AMP_RESTORE`/`AMP_RESTORE_DISC` (continue an earlier run), `NICE` (default 10) and `MEM_BUDGET_MB` (default 10000: a watchdog kills the stage if host RSS exceeds it, logs `[mem]` every ~60 s and the peak — the workstation shares CPU/RAM with the user's other jobs. A 50M-step segment runs at ≈6 GB RSS, but an in-process multi-segment run grows ≈0.6 GB per segment even after `gc.collect(); jax.clear_caches()` (v1dr hit 11.6 GB at segment 2 before that fix and 12.6 GB at segment 10 after it). Hence **`SEGMENT_ISOLATION=1` (default): every AMP segment is its own python process** (`train_jax_amp --segments 1 --iter-offset k`, restore from the previous iter; resume-aware), so the budget only has to cover one segment. Launch detached on the workstation via the `HexapodPipeline` scheduled task (`~/hexapod_pipeline_run.sh` in WSL). |
 | `tools/eval_dr_robustness.py` | Paired rollouts of policies + pure scaffold in the JAX env at several `--dr-scales`: fall %, termination %, tracking reward, alive steps. GPU in WSL (512 envs × 1000 steps in seconds); CPU for tiny sizes. |
 | `scripts/watch_demo_jax.py` | Render JAX/Brax policy through preset cmd phases. Auto-detects policy obs dim, exits cleanly on viewer close. |
@@ -423,6 +424,19 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   Compiles with the Arduino IDE's bundled CLI on the Mac:
   `arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3 mini_hexapod/firmware/arduino/hexapod_firmware`
   (needs the Adafruit PWM Servo Driver library).
+- **Board swap + calibration recovery (2026-11-19)**: the bot now carries a
+  **XIAO ESP32-S3** (same D4/D5 I2C pads; flash with
+  `bash mini_hexapod/firmware/flash.sh s3 PORT`, FQBN `XIAO_ESP32S3:USBMode=hwcdc`).
+  The original C3 was still running the stage-05 sketch (no export command), so its
+  18 trims + 18 signs were recovered READ-ONLY: `esptool read_flash 0x9000 0x5000` →
+  `tools/nvs_dump.py` → `tools/mini_pull_config.py --nvs-json` →
+  `mini_hexapod/calibration/2026-11-19_c3.json` (raw NVS image kept next to it).
+  **Firmware v0.3** bakes that calibration in as `DEFAULT_TRIM_US` / `DEFAULT_SIGN`
+  (used for any joint without an NVS value → a fresh S3 boots calibrated) and adds
+  menu `U` (line protocol `T/S/R/G/W … E`) fed by `tools/mini_push_config.py`, which
+  pushes a calibration JSON and diffs the board's `J` export (PASS verified on the
+  C3). `T`/`S`/`L` menus still adjust single joints on the bot. IMU deferred to a
+  later phase (bot must walk as-is first).
 - **Deployment path (decided 2026-11-12): tethered first.** The policy obs
   include the Python scaffold's foot intent and the action is a foot residual
   on top of it, so on-device inference would require porting
@@ -431,9 +445,15 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   streams joint targets at 50 Hz over USB serial to firmware menu `P`
   (`J a0..a17` radians, sim convention + sim leg order; firmware maps to its
   own leg order and applies trims/signs; 500 ms watchdog homes the legs).
-  Sources: `--source demo|hold|gamepad`; `--params` omitted = pure scaffold
-  (test this first on the bot); `--dry-run` needs no serial. On-device int8
-  inference stays a stretch goal.
+  Sources: `--source demo|hold|gamepad|console`; `--params` omitted = pure scaffold
+  (test this first on the bot); `--dry-run` needs no serial. **`--source console`
+  (2026-11-19) is the table-safe demo driver**: typed or `--script FILE` commands
+  (`forward [speed] [for SEC]`, `spin left`, `arc right`, `up 10`, `wide 8`,
+  `stop`, `home`, `demo`, `quit`); moves last `--default-duration` 5 s, then the
+  bot idles standing (scaffold at zero velocity is exactly still) with the policy
+  residual faded out over 0.5 s because training never commanded < 40 % of max
+  speed; stance height/width persist and ramp at 20 mm/s, clamped to the profile
+  envelope. On-device int8 inference stays a stretch goal.
 - **Mini speed ladder** (`speed_levels` 0.5…3.0 in the profile) from
   `tools/calibrate_scaffold_speed.py` on the placeholder MJCF
   (`tools/scaffold_speed_calibration_mini.csv`); default gait unchanged

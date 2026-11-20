@@ -355,3 +355,42 @@ def test_servo_command_hold(mujoco_available):
     assert np.array_equal(ctrls[0], ctrls[1]) and np.array_equal(ctrls[1], ctrls[3])
     assert not np.array_equal(ctrls[3], ctrls[4])
     assert np.array_equal(ctrls[4], ctrls[7]) and not np.array_equal(ctrls[7], ctrls[8])
+
+
+def test_drive_serial_console_source():
+    """Console grammar: timed moves, idle = zero velocity + residual faded out,
+    stance height/width persist and clamp to the robot's envelope."""
+    import math
+    import sys as _sys
+    _sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+    from drive_serial import ConsoleSource
+    from gait.controller import Controller
+    ctrl = Controller(str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml"))
+    src = ConsoleSource(ctrl, default_duration=2.0, interactive=False)
+    src.handle("forward for 1", t=0.0)
+    cmd = src(0.0)
+    assert math.isclose(cmd[0], 0.7 * ctrl.MAX_SPEED, rel_tol=1e-6) and cmd[1] == 0.0
+    for t in (0.25, 0.5, 0.75):
+        src(t)
+    assert src.residual_gain(0.75) == 1.0                   # faded in during the move
+    cmd = src(1.5)
+    assert cmd[0] == 0.0 and src.residual_gain(1.5) < 1.0  # idle: zero velocity, fading out
+    src(2.5)
+    assert src.residual_gain(2.5) == 0.0
+    src.handle("spin right 0.5", t=3.0)                     # default duration applies
+    cmd = src(3.0)
+    assert math.isclose(cmd[2], -0.5 * ctrl.MAX_YAW_RATE, rel_tol=1e-6)
+    assert src.move_end == 5.0
+    src.handle("up 10", t=3.0)
+    assert math.isclose(src.dh_goal, -0.010)                # negative dh = body raised
+    src.handle("up 100", t=3.0)
+    assert math.isclose(src.dh_goal, src.env.dh_min)        # clamped to the envelope
+    src.handle("wide 100", t=3.0)
+    assert math.isclose(src.dw_goal, src.env.safe_dw_range(src.dh_goal)[1])
+    src.handle("bogus 1", t=3.0)                            # unknown verb is ignored
+    src.handle("home", t=6.0)
+    assert src.paused and src.take_home_request() and not src.take_home_request()
+    src.handle("back for 1", t=6.0)
+    assert not src.paused
+    src.handle("quit", t=7.0)
+    assert src.done

@@ -1,0 +1,20 @@
+# scripts/drive_serial.py --source console --script docs/demo_script.txt
+# One command per line; moves default to 5 s, the bot stands still in between.
+forward
+wait 1
+back
+wait 1
+left for 3
+right for 3
+spin left for 4
+spin right for 4
+arc left for 4
+up 10
+forward for 3
+down 20
+forward for 3
+up 10
+wide 8
+forward for 3
+narrow 8
+home

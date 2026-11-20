@@ -1,0 +1,278 @@
+{
+  "firmware": "05_walking_controller (NVS dump of XIAO ESP32-C3, 2026-11-19; geometry = sketch constants)",
+  "servo": {
+    "min_us": 500,
+    "max_us": 2500,
+    "us_per_deg": 11.11111111111111,
+    "pwm_hz": 50
+  },
+  "geometry_mm": {
+    "L2": 55.0,
+    "L3": 89.5,
+    "R_HOME": 55.0,
+    "D_HOME": 89.5
+  },
+  "home_kin_angle_rad": [
+    0.0,
+    0.0,
+    1.5708
+  ],
+  "gait": null,
+  "joints": [
+    "COXA",
+    "FEMUR",
+    "KNEE"
+  ],
+  "legs": [
+    {
+      "name": "FR",
+      "right": true,
+      "board": 64,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "coxa_mm": [
+        56.75,
+        -32.0,
+        0.0
+      ],
+      "axis_rad": -0.7853981633974483,
+      "trim_us": [
+        1434,
+        1390,
+        1434
+      ],
+      "sign": [
+        -1,
+        -1,
+        -1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "MR",
+      "right": true,
+      "board": 64,
+      "channels": [
+        3,
+        4,
+        5
+      ],
+      "coxa_mm": [
+        0.0,
+        -42.4,
+        0.0
+      ],
+      "axis_rad": -1.5707963267948966,
+      "trim_us": [
+        1500,
+        1489,
+        1379
+      ],
+      "sign": [
+        -1,
+        1,
+        1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "RR",
+      "right": true,
+      "board": 64,
+      "channels": [
+        6,
+        7,
+        8
+      ],
+      "coxa_mm": [
+        -56.75,
+        -32.0,
+        0.0
+      ],
+      "axis_rad": -2.356194490192345,
+      "trim_us": [
+        1456,
+        1500,
+        1434
+      ],
+      "sign": [
+        -1,
+        1,
+        1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "FL",
+      "right": false,
+      "board": 65,
+      "channels": [
+        0,
+        1,
+        2
+      ],
+      "coxa_mm": [
+        56.75,
+        32.0,
+        0.0
+      ],
+      "axis_rad": 0.7853981633974483,
+      "trim_us": [
+        1467,
+        1665,
+        1445
+      ],
+      "sign": [
+        -1,
+        1,
+        1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "ML",
+      "right": false,
+      "board": 65,
+      "channels": [
+        3,
+        4,
+        5
+      ],
+      "coxa_mm": [
+        0.0,
+        42.4,
+        0.0
+      ],
+      "axis_rad": 1.5707963267948966,
+      "trim_us": [
+        1555,
+        1357,
+        1390
+      ],
+      "sign": [
+        -1,
+        -1,
+        -1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "name": "RL",
+      "right": false,
+      "board": 65,
+      "channels": [
+        6,
+        7,
+        8
+      ],
+      "coxa_mm": [
+        -56.75,
+        32.0,
+        0.0
+      ],
+      "axis_rad": 2.356194490192345,
+      "trim_us": [
+        1401,
+        1522,
+        1500
+      ],
+      "sign": [
+        -1,
+        -1,
+        -1
+      ],
+      "range_lo_us": [
+        0,
+        0,
+        0
+      ],
+      "range_hi_us": [
+        0,
+        0,
+        0
+      ],
+      "range_kin_rad": [
+        null,
+        null,
+        null
+      ]
+    }
+  ],
+  "pulled": {
+    "source": "esptool read_flash 0x9000 0x5000 -> tools/nvs_dump.py",
+    "when": "2026-11-19 17:01"
+  }
+}
