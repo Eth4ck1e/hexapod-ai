@@ -448,7 +448,8 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   Sources: `--source demo|hold|gamepad|console`; `--params` omitted = pure scaffold
   (test this first on the bot); `--dry-run` needs no serial. **`--source console`
   (2026-11-19) is the table-safe demo driver**: typed or `--script FILE` commands
-  (`forward [speed] [for SEC]`, `spin left`, `arc right`, `up 10`, `wide 8`,
+  (`forward [speed] [for SEC]`, `spin left`, `arc right`, `sweep` (heading 0→360° while
+  walking, 12 s), `up 10`, `wide 8`,
   `stop`, `home`, `demo`, `quit`); moves last `--default-duration` 5 s, then the
   bot idles standing (scaffold at zero velocity is exactly still) with the policy
   residual faded out over 0.5 s because training never commanded < 40 % of max
@@ -564,7 +565,15 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   `homeAll()` → first frame truncated in the 256 B USB RX buffer; now announced after
   homing, RX buffer 1 KB). Console default 0.70× reads as crawling on the real bot — use
   0.85× (the trained band is 0.40–0.85 of MAX_SPEED 0.075 m/s; bigger steps need a longer
-  `path_radius` in the profile + a 5-min re-clone, no PPO).
+  `path_radius` in the profile + a 5-min re-clone, no PPO). **Foot lift is its own knob
+  since 2026-11-20: `RobotProfile.lift_scale`** (swing apex = lift_scale·path_radius; both
+  controllers; PhantomX 1.0 = bit-identical). The 15 mm apex barely cleared the table on the
+  real bot → mini 1.4 (21 mm) and re-clone (`STAGES=bc TAG=p6`). Any gait-shape change =
+  edit the profile → BC-only rerun → `tools/eval_dr_robustness.py` vs the scaffold →
+  `tools/export_policy_weights.py` → `tools/package_submission.py`. **p6 (2026-11-20 09:29,
+  BC only, 3 min)**: = lifted scaffold in `media/plots/pure_p6_eval.csv` (64 paired eps, dr 0/1.0:
+  0 % falls, r_lin 0.998/0.997 vs 0.998/0.998); femur swing 18.7° vs p4's 12.9° (scaffold 19.9°).
+  **Ship p6**: `checkpoints/bc_pretrained_jax_mini_hexapod_pure_p6/params.pkl`; package rebuilt.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,

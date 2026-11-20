@@ -75,13 +75,14 @@ On stage, in this order (each step is a fallback for the next):
    then type `forward`, `left`, `spin right`, `up 10` … Each move runs 5 s and the bot
    stands still in between, so it stays on the table. Proves the tether + kinematics.
 3. **Policy over serial** — same console with `HEXAPOD_ROBOT=mini_hexapod_pure` and
-   `--params checkpoints/bc_pretrained_jax_mini_hexapod_pure_p4/params.pkl` (model-only;
+   `--params checkpoints/bc_pretrained_jax_mini_hexapod_pure_p6/params.pkl` (model-only;
    the residual v2h policy under `HEXAPOD_ROBOT=mini_hexapod` is the fallback); add
    `--speed-frac 0.85` (top of the trained band — the 0.70 default looks like crawling on
    the real bot); use `--script docs/demo_script.txt` for the rehearsed sequence,
    `--source gamepad` if the 8BitDo is paired. **Bench-tested 2026-11-20**: the full demo
    script ran on the model alone (forward/back/side-steps/spins/arc/height/width, 0 frame
-   errors); the user judged it indistinguishable from the programmed gait.
+   errors); the user judged it indistinguishable from the programmed gait. Foot lift was then
+   raised 15 → 21 mm (`lift_scale` 1.4) and the policy re-cloned as p6 (= scaffold, 0 % falls).
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
 5. **Between demos type `rest`** (or run with `--auto-rest 10`): the bot squats and
