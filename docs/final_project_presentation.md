@@ -52,6 +52,7 @@ corresponding run; everything else is already true today.
 | Dynamics DR run (v1dr) | continued v1 for 9 × 50M steps under full DR: eval +2278 → +2296 → +2289 (flat, same level as nominal) | `media/plots/training_curves_mini_v1_v1dr.png` |
 | v2h (final recipe: 50 Hz servo hold + DR, from scratch) | priors 73 s, BC 2.5 min, 10 × 50M PPO in 67 min; eval +2208 → +2288 → +2276; this is the policy for the bot | `media/plots/training_curves_mini_all.png` |
 | Robustness (512 paired episodes × 1000 steps, falls %) | scaffold / v1 / v1dr / v2h — dr 0: 0 / 0 / 0 / 0 · dr 1.0: 0 / 0 / 0 / 0 · dr 1.5 (friction 0.25–1.45×, servo 0.4–1.45×, chassis mass 0.7–1.9×): 0.2 / 0.2 / 0.2 / 0.0; any-termination at 1.5×: 3.5 / 3.5 / 3.1 / 3.5 % | `media/plots/dr_robustness_mini_hold.csv` |
+| Model-only controller (2026-11-19) | 21-in/18-out MLP (IMU slots + gait clock + cmd → joint targets), 49,124 params, 192 KB float32; cloned from the scaffold dataset: 0 % falls, tracking 0.997/0.46 vs scaffold 0.998/0.47 at dr 0 and 1.0. PPO+AMP continuation (p5) scored +2042 best in training but fell 3–11 % in paired eval → the cloned network is what ships | `media/plots/pure_p5_checkpoint_eval.csv`, `media/recordings/mini_pure_bc_p4_showcase.mp4` |
 | Real-bot result | `TODO` (scaffold-only first, then policy) | demo log CSV |
 
 ## 4. Demo runbook (live)
@@ -73,8 +74,9 @@ On stage, in this order (each step is a fallback for the next):
 2. **Scaffold over serial** — `drive_serial.py --port … --source console` (no `--params`),
    then type `forward`, `left`, `spin right`, `up 10` … Each move runs 5 s and the bot
    stands still in between, so it stays on the table. Proves the tether + kinematics.
-3. **Policy over serial** — same console with
-   `--params checkpoints/amp_to_mini_hexapod_v2h/iter10/final/params.pkl`; use
+3. **Policy over serial** — same console with `HEXAPOD_ROBOT=mini_hexapod_pure` and
+   `--params checkpoints/bc_pretrained_jax_mini_hexapod_pure_p4/params.pkl` (model-only;
+   the residual v2h policy under `HEXAPOD_ROBOT=mini_hexapod` is the fallback); use
    `--script docs/demo_script.txt` for the rehearsed sequence, `--source gamepad` if the
    8BitDo is paired.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;

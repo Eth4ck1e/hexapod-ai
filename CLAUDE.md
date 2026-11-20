@@ -546,7 +546,17 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   checkpoints' std head), and [EVAL] uses sampled actions. Harmless for a 12 mm foot
   residual, fatal for joint targets. p5: `ENTROPY_COST=0`, `DET_EVAL=1`
   (`--deterministic-eval`, what the robot runs). Check the std head whenever a
-  joint-target run degrades.
+  joint-target run degrades. **OUTCOME (p5, 2026-11-19 23:18, 10 × 50M, deterministic
+  evals +2014 → +1978, best +2042)**: `tools/eval_dr_robustness.py` on the Mac, 64 paired
+  episodes × 1000 steps at dr 0 and 1.0 (`media/plots/pure_p5_checkpoint_eval.csv`):
+  the **cloned policy `bc_pretrained_jax_mini_hexapod_pure_p4` = scaffold** (0 % falls,
+  0 % early terminations, r_lin 0.997 vs 0.998, r_ang 0.46 vs 0.47) while EVERY PPO
+  checkpoint falls 3–11 % and terminates early 8–25 % — PPO's higher training score was
+  style going up while task tracking slipped. **The model-only controller we ship is the
+  cloned network** (imitation of the scaffold dataset; AMP/PPO on flat ground only hurt
+  a sensorless open-loop policy, the project's old lesson once more). Packaged by
+  `tools/package_submission.py` → `deliverables/` (gitignored); exporter
+  `tools/export_policy_weights.py` (npz/json/C header + numpy reference verified to 5e-7).
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
