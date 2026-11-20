@@ -489,12 +489,15 @@ class Link:
     def drain(self, verbose: bool = False) -> None:
         if self.ser is None:
             return
-        while self.ser.in_waiting:
-            line = self.ser.readline().decode(errors="replace").strip()
-            if verbose and line:
-                print(f"  bot: {line}")
-            elif line and line not in ("ok",):
-                print(f"  bot: {line}")
+        try:
+            while self.ser.in_waiting:
+                line = self.ser.readline().decode(errors="replace").strip()
+                if verbose and line:
+                    print(f"  bot: {line}")
+                elif line and line not in ("ok",):
+                    print(f"  bot: {line}")
+        except OSError as e:                     # port vanished (USB reset / another program grabbed it)
+            raise SystemExit(f"serial port lost: {e}. Is screen/miniterm open on it? Replug the board and rerun.")
 
     def home(self) -> None:
         if self.ser is not None:
@@ -512,9 +515,12 @@ class Link:
 
     def close(self) -> None:
         if self.ser is not None:
-            self.ser.write(b"Q\n")
-            time.sleep(0.2)
-            self.ser.close()
+            try:
+                self.ser.write(b"Q\n")
+                time.sleep(0.2)
+                self.ser.close()
+            except Exception as e:               # port already gone — nothing left to tidy
+                print(f"  (serial close skipped: {e})")
 
 
 # ----------------------------------------------------------------------------
