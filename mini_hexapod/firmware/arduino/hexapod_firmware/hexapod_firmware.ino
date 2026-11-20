@@ -1268,8 +1268,11 @@ const uint8_t SIM_TO_FW_LEG[6] = {2, 1, 0, 5, 4, 3};   // RR RM RF LR LM LF
 void runStreamMode() {
   Serial.println();
   Serial.println("=== POLICY STREAM ===");
-  Serial.println("Waiting for 'J a0 .. a17' frames (rad, sim order). 'H' home, 'Z' relax, 'Q' quit.");
   homeAll();
+  // Announce readiness only AFTER homing: the host starts streaming on this line, and
+  // frames that arrive while homeAll() blocks would overflow the USB RX buffer (v0.3
+  // saw the first frame truncated to 16 numbers).
+  Serial.println("Waiting for 'J a0 .. a17' frames (rad, sim order). 'H' home, 'Z' relax, 'Q' quit.");
   unsigned long last_frame = millis();
   bool timed_out = false;
   String line;
@@ -1585,11 +1588,12 @@ void runExportMode() {
 // =                          SETUP / LOOP                             =
 // ====================================================================
 void setup() {
+  Serial.setRxBufferSize(1024);   // stream mode: ~130-byte frames at 50 Hz; default 256 B drops bytes during homeAll()
   Serial.begin(115200);
   delay(1000);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println("  mini_hexapod unified firmware  v0.3");
+  Serial.println("  mini_hexapod unified firmware  v0.3.1");
   Serial.println("==========================================");
 
   Wire.begin();
