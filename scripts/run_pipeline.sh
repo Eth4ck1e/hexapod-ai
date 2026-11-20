@@ -22,6 +22,7 @@
 #   ENTROPY_COST    PPO entropy bonus (default 1e-3)
 #   CLIP_EPS        PPO ratio clip (default 0.3; joint-target policies: 0.2)
 #   VALUE_EPOCHS    BC critic-pretraining epochs (default 3; 0 = random critic as before)
+#   DET_EVAL=1      score [EVAL] with the deterministic policy (joint-target policies)
 #   NUM_ENVS        PPO parallel envs (default chain_train.NUM_ENVS=4096; 2048 roughly halves the
 #                   host-RSS compile spike — joint-target graphs hit 11–20 GB at 4096)
 #   ACTION_SPACE    foot | joint (default: the chain_train session's)
@@ -144,6 +145,7 @@ if want amp; then
                 --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
                 ${LEARNING_RATE:+--learning-rate "$LEARNING_RATE"} ${ENTROPY_COST:+--entropy-cost "$ENTROPY_COST"}
                 ${CLIP_EPS:+--clipping-epsilon "$CLIP_EPS"} ${NUM_ENVS:+--num-envs "$NUM_ENVS"}
+                ${DET_EVAL:+--deterministic-eval}
                 --partition-disc --dr-scale "$DR_SCALE" --run "$RUN")
     if [[ "$SEGMENT_ISOLATION" == "1" ]]; then
       # One process per segment. Resume-aware: segments whose params.pkl exist

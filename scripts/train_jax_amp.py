@@ -421,6 +421,9 @@ def main():
                    help=f"PPO Adam learning rate (default {LEARNING_RATE}; joint-target policies: try 1e-4)")
     p.add_argument("--entropy-cost", type=float, default=ENTROPY_COST,
                    help=f"PPO entropy bonus (default {ENTROPY_COST})")
+    p.add_argument("--deterministic-eval", action="store_true",
+                   help="score [EVAL] with tanh(mean) instead of sampled actions (what the robot runs). "
+                        "Joint-target policies: sampled-action evals collapse as the std grows.")
     p.add_argument("--clipping-epsilon", type=float, default=0.3,
                    help="PPO likelihood-ratio clip (Brax default 0.3; joint-target policies: 0.2)")
     p.add_argument("--run", type=str, default=RUN_BASE)
@@ -652,6 +655,7 @@ def main():
             learning_rate      = args.learning_rate,
             entropy_cost       = args.entropy_cost,
             clipping_epsilon   = args.clipping_epsilon,
+            deterministic_eval = args.deterministic_eval,
             discounting        = DISCOUNT,
             unroll_length      = UNROLL_LENGTH,
             network_factory    = _custom_network_factory,
