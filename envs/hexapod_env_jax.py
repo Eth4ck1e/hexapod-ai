@@ -29,6 +29,7 @@ import mujoco
 import mujoco.mjx as mjx
 import numpy as np
 
+from envs.obs_layout import active_variant
 from gait import controller_jax as gait_jax
 
 # ----------------------------------------------------------------------------
@@ -470,7 +471,7 @@ def make_env_params(model_path: str,
         foot_force_limit=profile.foot_force_limit,
         foot_residual_scale_max=profile.foot_residual_scale,
         init_body_z_noise_m=profile.init_body_z_noise,
-        obs_cfg=ObsConfig(variant=profile.obs_variant,
+        obs_cfg=ObsConfig(variant=active_variant(profile.obs_variant),
                           imu_available=profile.imu_available),
         dw_envelope=jnp.asarray(stance.dw_coeffs, dtype=jnp.float32),
         dr_ranges=dr_ranges_for(dr_scale),
@@ -870,7 +871,8 @@ def _get_obs(params: EnvParams, mjx_data, cmd, sim_time, scaffold_hint, prev_ctr
     qpos = mjx_data.qpos
     qvel = mjx_data.qvel
     phase = (sim_time / params.gait.gait_period) % 1.0
-    if params.obs_cfg.variant == "hardware":
+    from envs.obs_layout import is_hardware
+    if is_hardware(params.obs_cfg.variant):
         # Open-loop servos: the only joint signal the firmware has is what it
         # commanded. ctrl is the target applied THIS step; prev_ctrl the one
         # before, so the finite difference is a one-step commanded velocity.

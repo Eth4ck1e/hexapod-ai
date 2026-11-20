@@ -305,7 +305,8 @@ class HexapodEnv(gym.Env):
         self.REF_BODY_Z     = prof.ref_body_z
         self.FOOT_CONTACT_Z = prof.foot_contact_z
         self._spawn_z       = prof.spawn_z
-        self._obs_variant   = prof.obs_variant
+        from envs.obs_layout import active_variant
+        self._obs_variant   = active_variant(prof.obs_variant)
         self._imu_available = prof.imu_available
         self._ctrl_hold     = int(prof.ctrl_hold_steps)   # servo command latch period (steps)
         foot_tip = np.asarray(self._ctrl.FOOT_TIP_LOCAL, dtype=np.float64)
@@ -852,7 +853,7 @@ class HexapodEnv(gym.Env):
         # inject IMU-only estimation noise instead.
         if self.stage == 4:
             body_linvel = np.zeros(3, dtype=np.float32)
-        if self._obs_variant == "hardware":
+        if self._obs_variant.startswith("hardware"):
             # Open-loop servos: commanded angle + its finite difference
             # (mirrors hexapod_env_jax._get_obs).
             joint_pos = self._data.ctrl

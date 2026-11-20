@@ -10,7 +10,8 @@ the underlying array library (jnp vs np). compose_obs() takes the components
 pre-computed by the caller plus a concatenate function — this avoids
 duplicating the layout knowledge across env files.
 
-Two layouts ("variants"), selected by `RobotProfile.obs_variant`:
+Three layouts ("variants"), selected by `RobotProfile.obs_variant` (or the
+HEXAPOD_OBS_VARIANT session override, see active_variant()):
 
   "full"     — v27 PhantomX obs, 78 dims. joint_pos/vel are the TRUE joint
                state (qpos/qvel), plus IMU and privileged body linvel.
@@ -46,7 +47,29 @@ OBS_SLOT_DIMS: "OrderedDict[str, int]" = OrderedDict([
 OBS_VARIANTS = {
     "full":     tuple(OBS_SLOT_DIMS.keys()),
     "hardware": tuple(k for k in OBS_SLOT_DIMS if k != "body_linvel"),
+    # "hardware_pure" (2026-11-19): the model-only controller. No scaffold hint —
+    # the policy outputs joint targets itself (ACTION_SPACE "joint", gait_scale 0)
+    # from its own last command, the phase clock and the cmd. The programmed gait
+    # is then used ONLY at training time (AMP priors + BC init), never on the bot.
+    "hardware_pure": tuple(k for k in OBS_SLOT_DIMS if k not in ("body_linvel", "scaffold_hint")),
 }
+
+# A training session may override the robot profile's obs variant (chain_train
+# sets HEXAPOD_OBS_VARIANT for the "mini_hexapod_pure" session). Resolved in one
+# place so the JAX env, the gym env and the serial driver always agree.
+import os as _os
+
+
+def active_variant(profile_variant: str) -> str:
+    v = _os.environ.get("HEXAPOD_OBS_VARIANT", "").strip() or profile_variant
+    if v not in OBS_VARIANTS:
+        raise ValueError(f"HEXAPOD_OBS_VARIANT={v!r} unknown; choose from {sorted(OBS_VARIANTS)}")
+    return v
+
+
+def is_hardware(variant: str) -> bool:
+    """Commanded-angle joint signals (open-loop servos) rather than measured state."""
+    return variant.startswith("hardware")
 
 
 def obs_slots(variant: str = "full") -> tuple:

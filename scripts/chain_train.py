@@ -63,6 +63,16 @@ ROBOT_SESSIONS = {
         MODEL_PATH="models/mini_hexapod_mjx.xml",
         RENDER_MODEL_PATH="models/mini_hexapod_simple.xml",   # no mesh model yet
     ),
+    # Model-only controller for the mini (2026-11-19): the policy outputs joint
+    # targets itself (no scaffold at runtime), obs without the scaffold hint.
+    # The programmed gait is used only for AMP priors + BC initialisation.
+    "mini_hexapod_pure": dict(
+        BASE_NAME="mini_pure_joint_v1",
+        MODEL_PATH="models/mini_hexapod_mjx.xml",
+        RENDER_MODEL_PATH="models/mini_hexapod_simple.xml",
+        OBS_VARIANT="hardware_pure",
+        ACTION_SPACE="joint",
+    ),
 }
 ROBOT = os.environ.get("HEXAPOD_ROBOT", "phantomx").strip() or "phantomx"   # cmd.exe `set X=v &&` keeps a trailing space
 if ROBOT not in ROBOT_SESSIONS:
@@ -71,7 +81,12 @@ _S = ROBOT_SESSIONS[ROBOT]
 
 BASE_NAME    = _S["BASE_NAME"]
 CMD_MASK     = "stage1"          # stage1 | stage2 | stage3
-ACTION_SPACE = "foot"            # joint | foot
+ACTION_SPACE = _S.get("ACTION_SPACE", "foot")   # joint | foot (per session)
+OBS_VARIANT  = _S.get("OBS_VARIANT")            # None = the robot profile's own
+if OBS_VARIANT:
+    # Both envs and the serial driver resolve the variant through
+    # envs.obs_layout.active_variant(), which reads this variable.
+    os.environ["HEXAPOD_OBS_VARIANT"] = OBS_VARIANT
 MODEL_PATH   = _S["MODEL_PATH"]
 RENDER_MODEL_PATH = _S["RENDER_MODEL_PATH"]
 

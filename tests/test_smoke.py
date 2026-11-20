@@ -228,6 +228,46 @@ def test_obs_variants():
     assert compose_obs(**parts, concat_fn=np.concatenate, variant="full").shape == (78,)
     hw = compose_obs(**parts, concat_fn=np.concatenate, variant="hardware")
     assert hw.shape == (75,) and not np.any(hw == 1.0), "hardware obs must drop body_linvel"
+    parts["scaffold_hint"] = np.full(18, 7.0)
+    pure = compose_obs(**parts, concat_fn=np.concatenate, variant="hardware_pure")
+    assert obs_dim("hardware_pure") == 57 and pure.shape == (57,)
+    assert not np.any(pure == 7.0) and not np.any(pure == 1.0), "pure obs: no scaffold hint, no body_linvel"
+
+
+def test_active_variant_override(monkeypatch):
+    from envs.obs_layout import active_variant
+    monkeypatch.delenv("HEXAPOD_OBS_VARIANT", raising=False)
+    assert active_variant("hardware") == "hardware"
+    monkeypatch.setenv("HEXAPOD_OBS_VARIANT", "hardware_pure")
+    assert active_variant("hardware") == "hardware_pure"
+    monkeypatch.setenv("HEXAPOD_OBS_VARIANT", "bogus")
+    with pytest.raises(ValueError):
+        active_variant("hardware")
+
+
+def test_pure_joint_policy_env(mujoco_available, monkeypatch):
+    """Model-only mini session: 57-dim obs, joint-target actions, BC target recovers
+    the scaffold exactly, and the env steps (CPU MJX)."""
+    pytest.importorskip("mujoco.mjx")
+    import jax
+    import jax.numpy as jnp
+    from envs import hexapod_env_jax as hx
+    monkeypatch.setenv("HEXAPOD_OBS_VARIANT", "hardware_pure")
+    params = hx.make_env_params(str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml"),
+                                cmd_mask_name="paper_stance")
+    assert params.obs_cfg.variant == "hardware_pure"
+    st = hx.reset(params, jax.random.PRNGKey(0), gait_scale=1.0)
+    assert st.obs.shape == (57,)
+    step = jax.jit(hx.step)
+    for _ in range(4):
+        st = step(params, st, jnp.zeros(18, dtype=jnp.float32))
+        bc = st.metrics["bc_target"]
+        # bc_target is the scaffold expressed in the joint action space; with the
+        # mini's excursions (≤0.57 rad) it never clips, so neutral + bc·scale == scaffold.
+        assert float(jnp.abs(bc).max()) < 1.0
+    assert not bool(st.done)
+    monkeypatch.delenv("HEXAPOD_OBS_VARIANT")
+    assert hx.make_env_params(str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml")).obs_cfg.variant == "hardware"
 
 
 def test_stance_envelope_per_profile():

@@ -55,6 +55,10 @@ MEM_BUDGET_MB="${MEM_BUDGET_MB:-10000}"
 SEGMENT_ISOLATION="${SEGMENT_ISOLATION:-1}"
 
 ROBOT="$HEXAPOD_ROBOT"
+# Action space follows the chain_train session (foot residual for phantomx /
+# mini_hexapod, joint targets for mini_hexapod_pure) unless overridden.
+ACTION_SPACE="${ACTION_SPACE:-$("$PY" -c 'import sys; sys.path.insert(0, "scripts"); from chain_train import ACTION_SPACE; print(ACTION_SPACE)' 2>/dev/null | tail -1)}"
+ACTION_SPACE="${ACTION_SPACE:-foot}"
 PRIORS="${PRIORS:-checkpoints/amp_priors_${ROBOT}_${TAG}.npz}"
 BC_DIR="${BC_DIR:-checkpoints/bc_pretrained_jax_${ROBOT}_${TAG}}"
 AMP_RESTORE="${AMP_RESTORE:-$BC_DIR/params.pkl}"
@@ -97,7 +101,7 @@ run_stage() {
   return "$rc"
 }
 
-log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
+log "pipeline start  robot=$ROBOT tag=$TAG stages='$STAGES' action_space=$ACTION_SPACE dr_scale=$DR_SCALE nice=$NICE mem_budget_mb=$MEM_BUDGET_MB python=$PY"
 log "priors=$PRIORS  bc_dir=$BC_DIR  amp_restore=$AMP_RESTORE  amp_restore_disc=${AMP_RESTORE_DISC:-<fresh>}"
 "$PY" -c "import jax; print('  jax devices:', jax.devices())"
 
@@ -118,7 +122,7 @@ if want bc; then
   else
     log "STAGE 2/3  BC pretrain → $BC_DIR"
     run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
-        "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space foot \
+        "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space "$ACTION_SPACE" \
         --out-dir "$BC_DIR"
   fi
 fi
@@ -128,7 +132,7 @@ if want amp; then
     log "AMP run complete → skip (checkpoints/$RUN)"
   else
     log "STAGE 3/3  AMP-PPO → checkpoints/$RUN  (${AMP_SEGMENTS} × ${AMP_STEPS} steps, dr_scale=$DR_SCALE, isolation=$SEGMENT_ISOLATION)"
-    amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space foot
+    amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space "$ACTION_SPACE"
                 --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
                 --partition-disc --dr-scale "$DR_SCALE" --run "$RUN")
     if [[ "$SEGMENT_ISOLATION" == "1" ]]; then

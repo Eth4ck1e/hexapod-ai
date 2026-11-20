@@ -66,10 +66,10 @@ change anything in one of these areas, edit ONLY the owning module.**
 
 | Module | Owns | Consumers |
 |---|---|---|
-| `envs/obs_layout.py` | Policy observation schema. Two variants selected by `RobotProfile.obs_variant`: `"full"` 78 dims (PhantomX, v26+) and `"hardware"` 75 dims (commanded joint angle + Δ/dt, IMU slots constant when `imu_available=False`, no body linvel — mini hexapod) | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
+| `envs/obs_layout.py` | Policy observation schema. Three variants selected by `RobotProfile.obs_variant` or the `HEXAPOD_OBS_VARIANT` session override (`active_variant()`): `"full"` 78 dims (PhantomX, v26+), `"hardware"` 75 dims (commanded joint angle + Δ/dt, IMU slots constant when `imu_available=False`, no body linvel — mini residual policy) and **`"hardware_pure"` 57 dims (no scaffold hint — the model-only mini controller, see "Model-only controller" below)** | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
 | `envs/stance_envelope.py` | `StanceEnvelope` + `envelope_for(profile\|model_path)`. The NUMBERS live in `RobotProfile` (PhantomX verified by eye; mini from `tools/derive_stance_envelope.py`); module constants are PhantomX aliases | JAX env (via `EnvParams.dw_envelope`), cmd_bins, watch_scaffold presets, demo_phases watch tests |
 | `envs/cmd_bins.py` | 150-bin partition (motion × height × width). `BinSpec` per robot via `bin_spec_for(model_path)`; every classifier defaults to the frozen PhantomX spec so v23–v27 bins/priors are unchanged | AMP env disc routing, prior_data binning, multi-head disc, train_jax_amp |
-| `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `NUM_ENVS`, `DISC_BATCH`. **`HEXAPOD_ROBOT=phantomx\|mini_hexapod`** (env var, default phantomx) picks the robot session; forwarded into WSL launches | train_jax_amp, pretrain_bc_jax, prior_data, watch_demo_jax, watch_controller, record_policy |
+| `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `OBS_VARIANT`, `NUM_ENVS`, `DISC_BATCH`. **`HEXAPOD_ROBOT=phantomx\|mini_hexapod\|mini_hexapod_pure`** (env var, default phantomx) picks the session; `mini_hexapod_pure` = same MJCF, `ACTION_SPACE="joint"`, `OBS_VARIANT="hardware_pure"` (exported as `HEXAPOD_OBS_VARIANT`); forwarded into WSL launches | train_jax_amp, pretrain_bc_jax, prior_data, watch_demo_jax, watch_controller, record_policy |
 | **`gait/robot_profile.py`** (2026-11-03, extended 2026-11-12) | Per-robot `RobotProfile`: leg mount geometry, link lengths, IK anchor pose, joint signs, gait defaults, speed ladder, owned MJCF filenames, **stance envelope, env scales (spawn_z, ref_body_z, min_body_z, motor/foot limits, foot_contact_z, height/width dev, foot residual authority), `arc_turning`, `obs_variant`, `imu_available`**. `PHANTOMX` is the default. | `gait/controller.py`, `gait/controller_jax.py`, **`envs/hexapod_env_jax.py:make_env_params`, `envs/hexapod_env.py`**, stance_envelope, cmd_bins — all via `Controller(model_path).profile` |
 
 If you find yourself manually syncing the same constant or formula
@@ -507,6 +507,22 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   curves `media/plots/training_curves_mini_all.png`;
   (5) when measured: finalize MJCF via `tools/import_mini_calibration.py`,
   re-derive envelope/speed, rerun the pipeline, drive the bot tethered.
+- **Model-only controller (decided 2026-11-19 — the user's end state)**: the bot
+  must be self-contained (Bluetooth/phone commands → the model walks; no laptop in
+  the loop) and the model must BE the controller, i.e. the paper's AMP picture: the
+  programmed gait exists only to generate the AMP dataset and the BC initialisation.
+  The residual design (`ACTION_SPACE="foot"`, scaffold hint in obs, scaffold mixed in
+  at runtime) violates that, so the mini is retrained as session
+  **`HEXAPOD_ROBOT=mini_hexapod_pure`**: `ACTION_SPACE="joint"` (target = neutral +
+  tanh(a)·`residual_scale_max` 0.80 rad; the mini scaffold stays ≤0.57 rad from
+  neutral so BC targets never clip), `OBS_VARIANT="hardware_pure"` (57 dims: commanded
+  joint pos/vel, constant IMU slots, phase clock sin/cos, cmd — no scaffold hint),
+  gait_scale 0 in PPO. Same `scripts/run_pipeline.sh` (action space follows the
+  session; reuse `PRIORS=checkpoints/amp_priors_mini_hexapod_v2h.npz`). First run:
+  `amp_to_mini_hexapod_pure_p1`. On the bot this needs only the MLP (float32 is
+  fine on the S3 FPU, ~50k MACs/step), a phase clock and the cmd — no gait port.
+  `drive_serial.py --action-space joint` (default from the session) tests it tethered
+  first. The residual v2h policy + scaffold port remains the fallback.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,

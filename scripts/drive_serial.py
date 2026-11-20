@@ -51,9 +51,10 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "scripts"))
 
+from chain_train import ACTION_SPACE as CHAIN_ACTION_SPACE  # noqa: E402
 from chain_train import MODEL_PATH as CHAIN_MODEL_PATH  # noqa: E402
 
-from envs.obs_layout import compose_obs, obs_dim  # noqa: E402
+from envs.obs_layout import active_variant, compose_obs, is_hardware, obs_dim  # noqa: E402
 from gait.controller import Controller  # noqa: E402
 
 LEG_ORDER = ("RR", "RM", "RF", "LR", "LM", "LF")
@@ -64,7 +65,7 @@ LEG_ORDER = ("RR", "RM", "RF", "LR", "LM", "LF")
 # ----------------------------------------------------------------------------
 def hardware_obs(ctrl_now: np.ndarray, ctrl_prev: np.ndarray, dt: float,
                  scaffold_hint: np.ndarray, phase: float, cmd: np.ndarray,
-                 imu_quat=None, imu_gyro=None) -> np.ndarray:
+                 imu_quat=None, imu_gyro=None, variant: str = "hardware") -> np.ndarray:
     if imu_quat is None:
         imu_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
     if imu_gyro is None:
@@ -80,7 +81,7 @@ def hardware_obs(ctrl_now: np.ndarray, ctrl_prev: np.ndarray, dt: float,
         cmd=np.asarray(cmd, dtype=np.float32),
         body_linvel=np.zeros(3, dtype=np.float32),
         concat_fn=np.concatenate,
-        variant="hardware",
+        variant=variant,
     ).astype(np.float32)
 
 
@@ -501,6 +502,9 @@ def main() -> None:
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--model", default=CHAIN_MODEL_PATH, help="MJCF → robot profile (HEXAPOD_ROBOT)")
     p.add_argument("--params", default=None, help="policy params.pkl; omit to stream the pure scaffold")
+    p.add_argument("--action-space", choices=["foot", "joint"], default=CHAIN_ACTION_SPACE,
+                   help="foot: policy = residual on the scaffold's feet (needs the scaffold at runtime); "
+                        "joint: policy outputs joint targets itself (model-only, HEXAPOD_ROBOT=mini_hexapod_pure)")
     p.add_argument("--speed-level", type=float, default=None, help="profile speed ladder entry")
     p.add_argument("--source", choices=["demo", "hold", "gamepad", "console"], default="demo")
     p.add_argument("--script", default=None, help="console: file of commands, one per line (# comments)")
@@ -523,11 +527,16 @@ def main() -> None:
     ctrl = Controller(model_path, speed_level=args.speed_level)
     prof = ctrl.profile
     dt = float(mujoco.MjModel.from_xml_path(model_path).opt.timestep)   # policy rate = training rate
-    obs_size = obs_dim(prof.obs_variant)
+    variant = active_variant(prof.obs_variant)
+    obs_size = obs_dim(variant)
     residual_scale = float(prof.foot_residual_scale)
-    print(f"robot={prof.name}  obs={prof.obs_variant}({obs_size})  imu={prof.imu_available}  "
+    if args.action_space == "joint":
+        # Same constant the JAX env uses: target = neutral + tanh(a) · residual_scale_max.
+        from envs.hexapod_env_jax import EnvParams
+        joint_scale = float(EnvParams._field_defaults["residual_scale_max"])
+    print(f"robot={prof.name}  obs={variant}({obs_size})  imu={prof.imu_available}  action={args.action_space}  "
           f"policy dt={dt*1e3:.1f} ms  send {args.send_rate:.0f} Hz  MAX_SPEED={ctrl.MAX_SPEED:.3f} m/s")
-    if prof.obs_variant != "hardware":
+    if not is_hardware(variant):
         print("WARNING: this profile's obs variant is not 'hardware'; the policy expects state "
               "the bot cannot measure. Use HEXAPOD_ROBOT=mini_hexapod.")
 
@@ -561,7 +570,7 @@ def main() -> None:
     # the per-tick target — same zero-order hold the env applies
     # (RobotProfile.ctrl_hold_steps).
     sent, prev_sent = neutral.copy(), neutral.copy()
-    obs = hardware_obs(sent, prev_sent, dt, feet0, 0.0, cmd)
+    obs = hardware_obs(sent, prev_sent, dt, feet0, 0.0, cmd, variant=variant)
 
     send_every = max(1, int(round(1.0 / (dt * args.send_rate))))
     if send_every != ctrl.profile.ctrl_hold_steps:
@@ -581,6 +590,12 @@ def main() -> None:
             scaffold_joints, feet_t = ctrl.predict_with_feet(cmd, t)
             if infer is None or gain <= 0.0:
                 target = np.asarray(scaffold_joints, dtype=np.float32)
+            elif args.action_space == "joint":
+                # Model-only: the policy IS the controller. The scaffold is not used;
+                # `gain` blends toward it only while the console idles/rests.
+                action = np.tanh(infer(obs))
+                policy_target = neutral + action * joint_scale
+                target = np.asarray(gain * policy_target + (1.0 - gain) * scaffold_joints, dtype=np.float32)
             else:
                 # Brax PPO's NormalTanhDistribution: deterministic action = tanh(mean),
                 # which is what the env saw during training.
@@ -607,7 +622,7 @@ def main() -> None:
                           f"RR=({target[0]:+.3f},{target[1]:+.3f},{target[2]:+.3f})")
 
             t += dt
-            obs = hardware_obs(sent, prev_sent, dt, feet_t, (t / ctrl.gait_period) % 1.0, cmd)
+            obs = hardware_obs(sent, prev_sent, dt, feet_t, (t / ctrl.gait_period) % 1.0, cmd, variant=variant)
             prev_sent = sent
             prev_target = target
             k += 1
