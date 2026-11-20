@@ -435,6 +435,29 @@ void printMainMenu() {
 
 // Quick wiring check: list every I2C device and flag the two servo drivers.
 void i2cScan() {
+  // 1) raw line levels with the bus released. SDA stuck LOW = a slave (or a
+  //    short) is holding the data line; every address then looks "found".
+  Wire.end();
+  pinMode(SDA, INPUT_PULLUP); pinMode(SCL, INPUT_PULLUP);
+  delay(2);
+  int sda0 = digitalRead(SDA), scl0 = digitalRead(SCL);
+  Serial.print("I2C lines idle: SDA="); Serial.print(sda0 ? "HIGH" : "LOW");
+  Serial.print(" SCL="); Serial.println(scl0 ? "HIGH" : "LOW");
+  if (!sda0) {
+    // Standard recovery: clock SCL until the slave releases SDA, then a STOP.
+    pinMode(SCL, OUTPUT_OPEN_DRAIN);
+    for (uint8_t i = 0; i < 16 && !digitalRead(SDA); ++i) {
+      digitalWrite(SCL, LOW); delayMicroseconds(10); digitalWrite(SCL, HIGH); delayMicroseconds(10);
+    }
+    pinMode(SDA, OUTPUT_OPEN_DRAIN);
+    digitalWrite(SDA, LOW); delayMicroseconds(10); digitalWrite(SCL, HIGH); delayMicroseconds(10);
+    digitalWrite(SDA, HIGH); delayMicroseconds(10);                 // STOP
+    pinMode(SDA, INPUT_PULLUP); pinMode(SCL, INPUT_PULLUP); delay(2);
+    Serial.print("  after 9-clock recovery: SDA="); Serial.print(digitalRead(SDA) ? "HIGH" : "LOW");
+    Serial.print(" SCL="); Serial.println(digitalRead(SCL) ? "HIGH" : "LOW");
+    if (!digitalRead(SDA)) Serial.println("  SDA still LOW: hardware holds it (wiring/short/damaged slave). Scan below is meaningless.");
+  }
+  Wire.begin();
   Serial.print("I2C scan (SDA="); Serial.print(SDA); Serial.print(" SCL="); Serial.print(SCL); Serial.println("):");
   uint8_t n = 0;
   for (uint8_t a = 0x08; a < 0x78; ++a) {
@@ -449,6 +472,8 @@ void i2cScan() {
     }
   }
   if (n == 0) Serial.println("  nothing answered — check SDA/SCL wiring and driver power");
+  if (n > 8)  Serial.println("  (>8 'devices' = SDA held low, not real devices)");
+  Serial.println("scan done");
 }
 
 void handleMainMenu() {
