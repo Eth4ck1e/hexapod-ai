@@ -88,15 +88,18 @@ def main() -> None:
     import mujoco
     from brax.training.acme import running_statistics
     from brax.training.agents.ppo.networks import make_ppo_networks
+    from demo_phases import TRAINED_SPEED_MAX_FRAC, TRAINED_SPEED_MIN_FRAC
     from pretrain_bc_jax import POLICY_HIDDEN_LAYERS
 
     from envs.hexapod_env_jax import EnvParams
     from envs.obs_layout import OBS_SLOT_DIMS, active_variant, obs_dim, obs_slots
+    from envs.stance_envelope import envelope_for
     from gait.controller import Controller
 
     model_path = args.model or chain_train.MODEL_PATH
     ctrl = Controller(str(_ROOT / model_path) if not Path(model_path).is_absolute() else model_path)
     prof = ctrl.profile
+    env = envelope_for(prof)
     variant = active_variant(prof.obs_variant)
     n_obs = obs_dim(variant)
 
@@ -164,7 +167,35 @@ def main() -> None:
         "gait_period_s": float(ctrl.gait_period),
         "max_speed_m_s": float(ctrl.MAX_SPEED),
         "max_yaw_rate_rad_s": float(ctrl.MAX_YAW_RATE),
+        # Standing pose for the on-board controller (the network was never shown
+        # a zero-velocity command): rest = foot_rest_coxa + (dw, 0, dh) per leg,
+        # joints = joint_signs * ik_raw(rest, L1, L2, L3) + leg_offsets  — the
+        # scaffold's exact output at zero velocity. Verified below.
+        "stance": {
+            "foot_rest_coxa_m": [[float(v) for v in row] for row in ctrl.FOOT_REST_COXA],
+            "leg_offsets_rad": [[float(v) for v in row] for row in ctrl.LEG_OFFSETS],
+            "joint_signs": [[float(v) for v in row] for row in ctrl._joint_signs_array],
+            "link_lengths_m": [float(ctrl.L1), float(ctrl.L2), float(ctrl.L3)],
+            "dh_range_m": [float(env.dh_min), float(env.dh_max)],
+            "dw_bounds": {"max_intercept": float(env.max_dw_intercept), "max_slope": float(env.max_dw_slope),
+                          "min_intercept": float(env.min_dw_intercept), "min_slope": float(env.min_dw_slope)},
+            "turn_radius_m": [float(ctrl.MIN_TURN_RADIUS), float(ctrl.MAX_TURN_RADIUS)],
+            "trained_speed_frac": [float(TRAINED_SPEED_MIN_FRAC), float(TRAINED_SPEED_MAX_FRAC)],
+        },
     }
+    # Check the stance formula against the scaffold at zero velocity over the envelope.
+    from gait.controller import _ik_raw_batch
+    worst = 0.0
+    for dh in np.linspace(env.dh_min, env.dh_max, 7):
+        lo, hi = env.safe_dw_range(dh)
+        for dw in np.linspace(lo, hi, 5):
+            cmd = np.zeros(9); cmd[5] = dh; cmd[6] = dw
+            ref_j, _ = ctrl.predict_with_feet(cmd, 0.0)
+            rest = ctrl.FOOT_REST_COXA.copy(); rest[:, 0] += dw; rest[:, 2] += dh
+            mine = (ctrl._joint_signs_array * _ik_raw_batch(rest, ctrl.L1, ctrl.L2, ctrl.L3) + ctrl.LEG_OFFSETS).ravel()
+            worst = max(worst, float(np.abs(mine - ref_j).max()))
+    print(f"stance formula vs scaffold at zero velocity: max |Δ| {worst:.2e} rad")
+    assert worst < 1e-9
 
     args.out.mkdir(parents=True, exist_ok=True)
     arrays = {"obs_mean": obs_mean, "obs_std": obs_std}
@@ -187,8 +218,21 @@ def main() -> None:
          f"#define POLICY_RESIDUAL_SCALE {meta['residual_scale_max']:.8e}f",
          f"#define POLICY_GAIT_PERIOD_S {meta['gait_period_s']:.8e}f",
          "static const int POLICY_LAYER_SIZES[] = {" + ", ".join(str(n_obs) if i == 0 else str(Ws[i-1].shape[1]) for i in range(len(Ws)+1)) + "};",
+         f"#define POLICY_MAX_SPEED {meta['max_speed_m_s']:.8e}f",
+         f"#define POLICY_MAX_YAW_RATE {meta['max_yaw_rate_rad_s']:.8e}f",
+         f"#define POLICY_MIN_TURN_RADIUS {ctrl.MIN_TURN_RADIUS:.8e}f",
+         f"#define POLICY_MAX_TURN_RADIUS {ctrl.MAX_TURN_RADIUS:.8e}f",
+         f"#define POLICY_SPEED_MIN_FRAC {TRAINED_SPEED_MIN_FRAC:.8e}f",
+         f"#define POLICY_SPEED_MAX_FRAC {TRAINED_SPEED_MAX_FRAC:.8e}f",
+         f"#define POLICY_DH_MIN {env.dh_min:.8e}f", f"#define POLICY_DH_MAX {env.dh_max:.8e}f",
+         f"#define POLICY_DW_MAX_INTERCEPT {env.max_dw_intercept:.8e}f", f"#define POLICY_DW_MAX_SLOPE {env.max_dw_slope:.8e}f",
+         f"#define POLICY_DW_MIN_INTERCEPT {env.min_dw_intercept:.8e}f", f"#define POLICY_DW_MIN_SLOPE {env.min_dw_slope:.8e}f",
+         f"#define POLICY_L1 {ctrl.L1:.8e}f", f"#define POLICY_L2 {ctrl.L2:.8e}f", f"#define POLICY_L3 {ctrl.L3:.8e}f",
          carr("POLICY_OBS_MEAN", obs_mean), carr("POLICY_OBS_STD", obs_std),
-         carr("POLICY_NEUTRAL_POSE", meta["neutral_pose_rad"])]
+         carr("POLICY_NEUTRAL_POSE", meta["neutral_pose_rad"]),
+         carr("POLICY_FOOT_REST_COXA", ctrl.FOOT_REST_COXA),      # [leg][xyz] m, sim leg order
+         carr("POLICY_LEG_OFFSETS", ctrl.LEG_OFFSETS),            # [leg][joint] rad
+         carr("POLICY_JOINT_SIGNS", ctrl._joint_signs_array)]     # [leg][joint]
     for i, (W, b) in enumerate(zip(Ws, bs)):
         h.append(carr(f"POLICY_W{i}", W))   # row-major [in][out]
         h.append(carr(f"POLICY_B{i}", b))

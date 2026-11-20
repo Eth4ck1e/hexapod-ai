@@ -132,7 +132,7 @@ const float   TRIPOD_OFFS[6] = {0, 0, 0, 0.5f, 0.5f, 0.5f};
 // =========================== STATE MACHINE ===========================
 enum Mode {
   MODE_MAIN, MODE_GEOMETRY, MODE_TRIM, MODE_SIGN,
-  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON, MODE_STREAM, MODE_UPLOAD
+  MODE_IK, MODE_WALK, MODE_BT, MODE_EXPORT, MODE_RANGE, MODE_JSON, MODE_STREAM, MODE_UPLOAD, MODE_NEURAL
 };
 Mode current_mode = MODE_MAIN;
 
@@ -460,6 +460,7 @@ void printMainMenu() {
   Serial.println("  W  walking controller");
   Serial.println("  B  bluetooth controller pairing (stub)");
   Serial.println("  L  joint travel-limit calibration (jog to each stop)");
+  Serial.println("  N  NEURAL controller: the learned policy runs on this board (type moves)");
   Serial.println("  P  policy stream (host PC sends joint targets over serial)");
   Serial.println("  U  upload a saved calibration from the host");
   Serial.println("  X  export full config as C++");
@@ -528,6 +529,7 @@ void handleMainMenu() {
       case 'B': case 'b': current_mode = MODE_BT;       return;
       case 'L': case 'l': current_mode = MODE_RANGE;    return;
       case 'P': case 'p': current_mode = MODE_STREAM;   return;
+      case 'N': case 'n': current_mode = MODE_NEURAL;   return;
       case 'U': case 'u': current_mode = MODE_UPLOAD;   return;
       case 'X': case 'x': current_mode = MODE_EXPORT;   return;
       case 'J': case 'j': current_mode = MODE_JSON;     return;
@@ -1456,7 +1458,7 @@ void runJsonMode() {
   Serial.println();
   Serial.println("BEGIN_JSON");
   Serial.println("{");
-  Serial.println("  \"firmware\": \"mini_hexapod unified v0.3\",");
+  Serial.println("  \"firmware\": \"mini_hexapod unified v0.4\",");
   Serial.print("  \"servo\": {\"min_us\": "); Serial.print(SERVO_MIN_US);
   Serial.print(", \"max_us\": "); Serial.print(SERVO_MAX_US);
   Serial.print(", \"us_per_deg\": "); Serial.print(US_PER_DEG, 4);
@@ -1593,7 +1595,7 @@ void setup() {
   delay(1000);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println("  mini_hexapod unified firmware  v0.3.1");
+  Serial.println("  mini_hexapod unified firmware  v0.4");
   Serial.println("==========================================");
 
   Wire.begin();
@@ -1626,5 +1628,6 @@ void loop() {
     case MODE_JSON:     runJsonMode(); break;
     case MODE_STREAM:   runStreamMode(); break;
     case MODE_UPLOAD:   runUploadMode(); break;
+    case MODE_NEURAL:   runNeuralMode(); break;
   }
 }
