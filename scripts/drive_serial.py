@@ -210,6 +210,8 @@ class ConsoleSource:
     """
     FADE_S = 0.5
     RAMP_MM_S = 20.0                  # stance height / width ramp rate
+    VEL_RAMP_S = 0.4                  # 0 → full commanded velocity over this long (and back), so a
+                                      # move does not start with a 25° single-frame servo jump
     HEADINGS = {"forward": 0.0, "fwd": 0.0, "f": 0.0, "back": math.pi, "backward": math.pi, "b": math.pi,
                 "left": math.pi / 2, "strafe-left": math.pi / 2, "right": -math.pi / 2,
                 "strafe-right": -math.pi / 2, "fl": math.pi / 4, "fr": -math.pi / 4,
@@ -230,7 +232,8 @@ class ConsoleSource:
         self.default_duration = float(default_duration)
         self.speed_frac = speed_frac or DEFAULT_SPEED_FRAC
         self.band = (TRAINED_SPEED_MIN_FRAC, TRAINED_SPEED_MAX_FRAC)
-        self.vel = np.zeros(3, dtype=np.float32)      # active move (vx, vy, wz)
+        self.vel = np.zeros(3, dtype=np.float32)      # active move (vx, vy, wz) — the target
+        self._vel_now = np.zeros(3, dtype=np.float32) # ramped value actually commanded
         self.move_end = -1.0                          # sim time the move stops
         self.move_label = ""
         self.dh = 0.0; self.dw = 0.0                  # current (ramped) stance
@@ -396,7 +399,8 @@ class ConsoleSource:
                 self._idle_since = None
         if idle and self.script:
             self.handle(self.script.pop(0), t)
-        elif idle and not self.script and not self.interactive and self._gain <= 0.0 and not self._rest_pending:
+        elif (idle and not self.script and not self.interactive and self._gain <= 0.0
+              and not self._rest_pending and not np.any(self._vel_now)):
             self.done = True                      # scripted, non-interactive run: finished
 
     def __call__(self, t: float) -> np.ndarray:
@@ -419,8 +423,12 @@ class ConsoleSource:
         moving = self._hold_until <= t < self.move_end
         self._gain = min(1.0, self._gain + dt / self.FADE_S) if moving else max(0.0, self._gain - dt / self.FADE_S)
         cmd = np.zeros(9, dtype=np.float32)
-        if moving:
-            cmd[:3] = self.vel
+        target = self.vel if moving else np.zeros(3, dtype=np.float32)
+        # Linear ramp per axis at (full-scale / VEL_RAMP_S).
+        scale = np.array([self.ctrl.MAX_SPEED, self.ctrl.MAX_SPEED, self.ctrl.MAX_YAW_RATE], dtype=np.float32)
+        step = scale * (dt / self.VEL_RAMP_S)
+        self._vel_now = np.clip(target, self._vel_now - step, self._vel_now + step).astype(np.float32)
+        cmd[:3] = self._vel_now
         cmd[5] = self.dh; cmd[6] = self.dw
         return cmd
 

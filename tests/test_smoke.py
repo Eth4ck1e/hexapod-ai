@@ -409,17 +409,19 @@ def test_drive_serial_console_source():
     ctrl = Controller(str(_PROJECT_ROOT / "models" / "mini_hexapod_mjx.xml"))
     src = ConsoleSource(ctrl, default_duration=2.0, interactive=False)
     src.handle("forward for 1", t=0.0)
-    cmd = src(0.0)
-    assert math.isclose(cmd[0], 0.7 * ctrl.MAX_SPEED, rel_tol=1e-6) and cmd[1] == 0.0
-    for t in (0.25, 0.5, 0.75):
-        src(t)
+    cmd0 = src(0.0)
+    assert cmd0[0] == 0.0 and cmd0[1] == 0.0                # velocity ramps up, no step
+    cmds = [src(t) for t in np.arange(0.01, 0.76, 0.01)]
+    assert math.isclose(cmds[-1][0], 0.7 * ctrl.MAX_SPEED, rel_tol=1e-6) and cmds[-1][1] == 0.0
+    assert all(c[0] <= n[0] + 1e-9 for c, n in zip(cmds, cmds[1:]))   # monotone ramp
     assert src.residual_gain(0.75) == 1.0                   # faded in during the move
     cmd = src(1.5)
-    assert cmd[0] == 0.0 and src.residual_gain(1.5) < 1.0  # idle: zero velocity, fading out
+    assert cmd[0] == 0.0 and src.residual_gain(1.5) < 1.0  # idle after ramp-down, residual fading out
     src(2.5)
     assert src.residual_gain(2.5) == 0.0
     src.handle("spin right 0.5", t=3.0)                     # default duration applies
-    cmd = src(3.0)
+    for t in np.arange(3.0, 3.6, 0.01):
+        cmd = src(t)
     assert math.isclose(cmd[2], -0.5 * ctrl.MAX_YAW_RATE, rel_tol=1e-6)
     assert src.move_end == 5.0
     src.handle("up 10", t=3.0)
