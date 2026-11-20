@@ -76,18 +76,21 @@ On stage, in this order (each step is a fallback for the next):
    stands still in between, so it stays on the table. Proves the tether + kinematics.
 3. **Policy over serial** — same console with `HEXAPOD_ROBOT=mini_hexapod_pure` and
    `--params checkpoints/bc_pretrained_jax_mini_hexapod_pure_p4/params.pkl` (model-only;
-   the residual v2h policy under `HEXAPOD_ROBOT=mini_hexapod` is the fallback); use
-   `--script docs/demo_script.txt` for the rehearsed sequence, `--source gamepad` if the
-   8BitDo is paired.
+   the residual v2h policy under `HEXAPOD_ROBOT=mini_hexapod` is the fallback); add
+   `--speed-frac 0.85` (top of the trained band — the 0.70 default looks like crawling on
+   the real bot); use `--script docs/demo_script.txt` for the rehearsed sequence,
+   `--source gamepad` if the 8BitDo is paired. **Bench-tested 2026-11-20**: the full demo
+   script ran on the model alone (forward/back/side-steps/spins/arc/height/width, 0 frame
+   errors); the user judged it indistinguishable from the programmed gait.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
 5. **Between demos type `rest`** (or run with `--auto-rest 10`): the bot squats and
    the servos go limp. The 9 g servos drift when they sit stalled and hot, so
    standing powered for minutes visibly sags the stance; resting fixes it.
 
-Say out loud what the audience can and cannot see: the policy is a learned
-*correction* on top of the scaffold (±12 mm per foot), so a good result looks
-like "the same gait, a little smoother / more robust", not a new gait.
+Say out loud what the audience can and cannot see: the model-only policy was cloned
+from the programmed gait's dataset, so a good result looks like *the same gait*, now
+produced by a 49k-parameter network from (clock, command) alone — not a new gait.
 
 ## 5. Timeline to presentation
 

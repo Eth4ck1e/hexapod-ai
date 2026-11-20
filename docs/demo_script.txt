@@ -18,3 +18,4 @@ wide 8
 forward for 3
 narrow 8
 home
+rest

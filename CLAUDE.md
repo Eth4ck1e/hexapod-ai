@@ -557,6 +557,14 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   a sensorless open-loop policy, the project's old lesson once more). Packaged by
   `tools/package_submission.py` → `deliverables/` (gitignored); exporter
   `tools/export_policy_weights.py` (npz/json/C header + numpy reference verified to 5e-7).
+  **Hardware test 2026-11-20 (tethered, S3, firmware v0.3.1)**: `docs/demo_script.txt` ran
+  on the model alone at `--speed-frac 0.85` with 0 frame errors; joint targets within 0.3°
+  mean / 3.8° worst of the scaffold's over 981 frames; user: indistinguishable from the
+  programmed gait. Firmware v0.3.1 fixes the one real link bug (ready line printed before
+  `homeAll()` → first frame truncated in the 256 B USB RX buffer; now announced after
+  homing, RX buffer 1 KB). Console default 0.70× reads as crawling on the real bot — use
+  0.85× (the trained band is 0.40–0.85 of MAX_SPEED 0.075 m/s; bigger steps need a longer
+  `path_radius` in the profile + a 5-min re-clone, no PPO).
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
