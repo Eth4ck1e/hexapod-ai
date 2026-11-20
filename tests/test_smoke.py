@@ -229,9 +229,10 @@ def test_obs_variants():
     hw = compose_obs(**parts, concat_fn=np.concatenate, variant="hardware")
     assert hw.shape == (75,) and not np.any(hw == 1.0), "hardware obs must drop body_linvel"
     parts["scaffold_hint"] = np.full(18, 7.0)
+    parts["joint_pos"] = np.full(18, 5.0); parts["joint_vel"] = np.full(18, 6.0)
     pure = compose_obs(**parts, concat_fn=np.concatenate, variant="hardware_pure")
-    assert obs_dim("hardware_pure") == 57 and pure.shape == (57,)
-    assert not np.any(pure == 7.0) and not np.any(pure == 1.0), "pure obs: no scaffold hint, no body_linvel"
+    assert obs_dim("hardware_pure") == 21 and pure.shape == (21,)
+    assert not np.any(np.isin(pure, [1.0, 5.0, 6.0, 7.0])), "pure obs: IMU slots + phase + cmd only"
 
 
 def test_active_variant_override(monkeypatch):
@@ -257,7 +258,7 @@ def test_pure_joint_policy_env(mujoco_available, monkeypatch):
                                 cmd_mask_name="paper_stance")
     assert params.obs_cfg.variant == "hardware_pure"
     st = hx.reset(params, jax.random.PRNGKey(0), gait_scale=1.0)
-    assert st.obs.shape == (57,)
+    assert st.obs.shape == (21,)
     step = jax.jit(hx.step)
     for _ in range(4):
         st = step(params, st, jnp.zeros(18, dtype=jnp.float32))

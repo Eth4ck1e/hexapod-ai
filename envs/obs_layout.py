@@ -47,11 +47,17 @@ OBS_SLOT_DIMS: "OrderedDict[str, int]" = OrderedDict([
 OBS_VARIANTS = {
     "full":     tuple(OBS_SLOT_DIMS.keys()),
     "hardware": tuple(k for k in OBS_SLOT_DIMS if k != "body_linvel"),
-    # "hardware_pure" (2026-11-19): the model-only controller. No scaffold hint —
-    # the policy outputs joint targets itself (ACTION_SPACE "joint", gait_scale 0)
-    # from its own last command, the phase clock and the cmd. The programmed gait
-    # is then used ONLY at training time (AMP priors + BC init), never on the bot.
-    "hardware_pure": tuple(k for k in OBS_SLOT_DIMS if k not in ("body_linvel", "scaffold_hint")),
+    # "hardware_pure" (2026-11-19): the model-only controller. The policy outputs
+    # joint targets itself (ACTION_SPACE "joint", gait_scale 0) as a function of the
+    # IMU slots (constants until an IMU exists), the phase clock and the cmd — 21 dims.
+    # No scaffold hint, and deliberately NO commanded joint pos/vel either: with those
+    # the policy's input is its own last output, so every PPO update shifts the input
+    # distribution away from the BC demos and errors compound (p1–p3 collapsed from a
+    # BC start that matched the scaffold within 3 %). Without them the policy is a
+    # clock+cmd → joints function, like the scaffold it was cloned from, and PPO/AMP
+    # can only reshape that function. The programmed gait is used ONLY at training
+    # time (AMP priors + BC init), never on the bot.
+    "hardware_pure": ("imu_quat", "imu_gyro", "imu_accel", "phase_sc", "cmd"),
 }
 
 # A training session may override the robot profile's obs variant (chain_train

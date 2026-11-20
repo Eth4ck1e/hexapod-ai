@@ -66,7 +66,7 @@ change anything in one of these areas, edit ONLY the owning module.**
 
 | Module | Owns | Consumers |
 |---|---|---|
-| `envs/obs_layout.py` | Policy observation schema. Three variants selected by `RobotProfile.obs_variant` or the `HEXAPOD_OBS_VARIANT` session override (`active_variant()`): `"full"` 78 dims (PhantomX, v26+), `"hardware"` 75 dims (commanded joint angle + Δ/dt, IMU slots constant when `imu_available=False`, no body linvel — mini residual policy) and **`"hardware_pure"` 57 dims (no scaffold hint — the model-only mini controller, see "Model-only controller" below)** | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
+| `envs/obs_layout.py` | Policy observation schema. Three variants selected by `RobotProfile.obs_variant` or the `HEXAPOD_OBS_VARIANT` session override (`active_variant()`): `"full"` 78 dims (PhantomX, v26+), `"hardware"` 75 dims (commanded joint angle + Δ/dt, IMU slots constant when `imu_available=False`, no body linvel — mini residual policy) and **`"hardware_pure"` 21 dims (IMU slots + phase clock + cmd only — the model-only mini controller, see "Model-only controller" below)** | JAX env, gym env, watch_demo_jax, eval_bc_quick, record_policy |
 | `envs/stance_envelope.py` | `StanceEnvelope` + `envelope_for(profile\|model_path)`. The NUMBERS live in `RobotProfile` (PhantomX verified by eye; mini from `tools/derive_stance_envelope.py`); module constants are PhantomX aliases | JAX env (via `EnvParams.dw_envelope`), cmd_bins, watch_scaffold presets, demo_phases watch tests |
 | `envs/cmd_bins.py` | 150-bin partition (motion × height × width). `BinSpec` per robot via `bin_spec_for(model_path)`; every classifier defaults to the frozen PhantomX spec so v23–v27 bins/priors are unchanged | AMP env disc routing, prior_data binning, multi-head disc, train_jax_amp |
 | `scripts/chain_train.py` | Session config + VRAM-budget knobs: `BASE_NAME`, `MODEL_PATH`, `RENDER_MODEL_PATH`, `ACTION_SPACE`, `OBS_VARIANT`, `NUM_ENVS`, `DISC_BATCH`. **`HEXAPOD_ROBOT=phantomx\|mini_hexapod\|mini_hexapod_pure`** (env var, default phantomx) picks the session; `mini_hexapod_pure` = same MJCF, `ACTION_SPACE="joint"`, `OBS_VARIANT="hardware_pure"` (exported as `HEXAPOD_OBS_VARIANT`); forwarded into WSL launches | train_jax_amp, pretrain_bc_jax, prior_data, watch_demo_jax, watch_controller, record_policy |
@@ -515,8 +515,9 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   at runtime) violates that, so the mini is retrained as session
   **`HEXAPOD_ROBOT=mini_hexapod_pure`**: `ACTION_SPACE="joint"` (target = neutral +
   tanh(a)·`residual_scale_max` 0.80 rad; the mini scaffold stays ≤0.57 rad from
-  neutral so BC targets never clip), `OBS_VARIANT="hardware_pure"` (57 dims: commanded
-  joint pos/vel, constant IMU slots, phase clock sin/cos, cmd — no scaffold hint),
+  neutral so BC targets never clip), `OBS_VARIANT="hardware_pure"` (21 dims: constant IMU
+  slots, phase clock sin/cos, cmd — no scaffold hint and, since p4, no commanded joint
+  pos/vel either: see "Lessons" below),
   gait_scale 0 in PPO. Same `scripts/run_pipeline.sh` (action space follows the
   session; reuse `PRIORS=checkpoints/amp_priors_mini_hexapod_v2h.npz`). First run:
   `amp_to_mini_hexapod_pure_p1`. On the bot this needs only the MLP (float32 is
@@ -534,7 +535,12 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   post-step obs with the step's label (off by one; irrelevant for ≈0 residual labels,
   but a joint-target policy could read its label from `joint_pos`) → now pre-step obs.
   Also `--clipping-epsilon` (CLIP_EPS). A near-deterministic actor (log_std −6) makes
-  PPO ratios explode — keep log_std −4 and lower the LR instead.
+  PPO ratios explode — keep log_std −4 and lower the LR instead. (3) p3 (critic
+  pretrained, pairing fixed, BC = scaffold within 3 %) STILL fell from ≈+1620 to +1229
+  in segment 1: with commanded joint pos/vel in the obs the policy's input is its own
+  previous output, so PPO updates shift the input distribution off the BC demos and
+  compound. p4 removes them — the pure policy is a clock+cmd → joints function
+  (21-dim obs), which is also all a sensorless bot can honestly use.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
