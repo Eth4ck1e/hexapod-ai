@@ -540,7 +540,13 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   in segment 1: with commanded joint pos/vel in the obs the policy's input is its own
   previous output, so PPO updates shift the input distribution off the BC demos and
   compound. p4 removes them — the pure policy is a clock+cmd → joints function
-  (21-dim obs), which is also all a sensorless bot can honestly use.
+  (21-dim obs), which is also all a sensorless bot can honestly use. (4) p4 still
+  slid +1879 → +1728 → +1314: the policy's exploration std grew 1° → 1.4° → 6.7° →
+  14.5° per joint over three segments (PPO entropy bonus 1e-3; measured from the
+  checkpoints' std head), and [EVAL] uses sampled actions. Harmless for a 12 mm foot
+  residual, fatal for joint targets. p5: `ENTROPY_COST=0`, `DET_EVAL=1`
+  (`--deterministic-eval`, what the robot runs). Check the std head whenever a
+  joint-target run degrades.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,
