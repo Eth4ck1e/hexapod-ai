@@ -41,6 +41,11 @@ SCRUB = [
     (r"gait/robot_profile\.py", "the simulator's robot profile"),
     (r"envs/[\w./-]+", "the simulator"),
     (r"\s*\(p1[–-]p3[^)]*\)", ""),
+    (r"tools/export_policy_weights\.py", "the model exporter"),
+    (r"tools/check_neural_core\.py", "the host-side check"),
+    (r"checkpoints/[\w./-]+", "the training checkpoint"),
+    (r"scripts/[\w./-]+", "the host driver"),
+    (r"gait/[\w./-]+", "the simulator's gait controller"),
 ]
 
 
@@ -64,6 +69,27 @@ def scrub_firmware(text: str, version_note: str) -> str:
 
 
 FW_README = """# Mini hexapod firmware
+
+## The learned controller runs on the board (menu `N`)
+
+`neural_mode.ino` evaluates the exported policy (`policy_weights.h`, a 21-input MLP cloned from
+the gait dataset; `neural_core.h` is the portable C core) at 50 Hz from a gait clock and the current
+command, and writes the 18 joint targets straight to the servos. No host computer is involved.
+Commands reach it three ways:
+
+* **Web controller** — the board runs a WiFi access point `hexapod` / `hexapod123`; open
+  `http://192.168.4.1/` (most phones pop the page up automatically). Two sticks (walk, tilt),
+  hold buttons for raise/lower/wider/narrower/spin, speed slider, stand / rest / stop, and live
+  telemetry. `wifi SSID PASS` in the serial console also joins your own network (saved in NVS).
+* **Dabble gamepad over Bluetooth LE** (STEMpedia Dabble app, Gamepad module, joystick mode):
+  stick walks, square/circle spin, triangle/cross raise/lower 5 mm, start wakes, select rests.
+* **Text lines** over USB serial or any BLE serial app: `forward [speed] [for SEC]`, `left`, `fl`,
+  `spin left`, `arc right`, `sweep`, `up 10`, `wide 8`, `speed 0.7`, `rest`, `stop`, `home`, `stats`.
+
+A phone input while the board sits in the main menu enters `N` automatically, so a powered-up bot
+needs no laptop. Between demos use `rest` (body lowered, servos limp) — the 9 g servos drift when
+they sit stalled and hot.
+
 
 Unified firmware for the 18-servo mini hexapod: Seeed XIAO ESP32-S3 (or ESP32-C3) driving two
 PCA9685 PWM boards (right legs 0x40, left legs 0x41), 18 × 9 g servos at 50 Hz.
@@ -176,9 +202,18 @@ def main() -> None:
     (out / "plots").mkdir()
     (out / "docs").mkdir()
 
-    # Firmware
-    (out / "firmware" / "hexapod_firmware" / "hexapod_firmware.ino").write_text(
-        scrub_firmware(FW_SRC.read_text(), args.version_note))
+    # Firmware: every source file of the sketch (main .ino, neural controller, BLE, WiFi/web,
+    # the portable C core and the generated policy header), comments scrubbed.
+    for src in sorted(FW_SRC.parent.iterdir()):
+        if src.suffix in (".ino", ".h") and src.is_file():
+            text = src.read_text()
+            if src.name == "hexapod_firmware.ino":
+                text = scrub_firmware(text, args.version_note)
+            elif src.name != "policy_weights.h":
+                text = scrub_firmware(text, args.version_note).split("\n", 3)[3]   # scrub, drop the banner
+            else:
+                text = re.sub(r"// source: .*", "// source: the training checkpoint shipped as model/policy.pkl", text)
+            (out / "firmware" / "hexapod_firmware" / src.name).write_text(text)
     flash = FLASH_SRC.read_text().replace('SKETCH="$HERE/arduino/hexapod_firmware"', 'SKETCH="$HERE/hexapod_firmware"')
     (out / "firmware" / "flash.sh").write_text(flash)
     (out / "firmware" / "README.md").write_text(FW_README)
