@@ -54,3 +54,4 @@ tools/cache/
 
 # Third-party binaries (HSL is per-user licensed, must not be redistributed)
 vendor/
+mini_hexapod/firmware/arduino/**/build/
