@@ -24,13 +24,18 @@
 
 static inline float nc_swish(float x) { return x / (1.0f + expf(-x)); }
 
+// W is row-major [in][out]. Stream it row by row: the weights sit in flash behind a small
+// cache on the ESP32-S3, and a column-wise walk (one element per cache line) made a single
+// evaluation take ~46 ms; sequential rows take ~2 ms.
 static void nc_dense(const float* in, int n_in, const float* W, const float* b, float* out, int n_out, int act) {
-  for (int o = 0; o < n_out; ++o) {
-    float acc = b[o];
-    const float* w = W + o;                 // W is row-major [in][out]
-    for (int i = 0; i < n_in; ++i) acc += in[i] * w[(size_t)i * n_out];
-    out[o] = act ? nc_swish(acc) : acc;
+  for (int o = 0; o < n_out; ++o) out[o] = b[o];
+  for (int i = 0; i < n_in; ++i) {
+    const float x = in[i];
+    if (x == 0.0f) continue;
+    const float* w = W + (size_t)i * n_out;
+    for (int o = 0; o < n_out; ++o) out[o] += x * w[o];
   }
+  if (act) for (int o = 0; o < n_out; ++o) out[o] = nc_swish(out[o]);
 }
 
 // obs[21] -> joints[18] (radians, sim convention/order).

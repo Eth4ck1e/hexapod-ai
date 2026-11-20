@@ -58,19 +58,21 @@ async def run(host: str, dry: bool) -> None:
             async for m in ws:
                 if m.startswith("T "):
                     f = m.split()
-                    tele.update(v=f[1:4], h=f[4], w=f[5], pitch=f[6], roll=f[7], gain=f[8], state=f[9], tick=f[10], net=f[11])
+                    tele.update(v=f[1:4], h=f[4], w=f[5], pitch=f[6], roll=f[7], gain=f[8], state=f[9], tick=f[10], net=f[11], late=f[13] if len(f) > 13 else "?")
                 elif m.startswith("M "):
                     print(f"      msg| {m[2:]}", flush=True)
-                elif m == "P" and "p" in pending:
-                    rtts.append((time.perf_counter() - pending.pop("p")) * 1000)
+                elif m.startswith("P"):
+                    k = m[1:].strip() or "p"
+                    if k in pending:
+                        rtts.append((time.perf_counter() - pending.pop(k)) * 1000)
 
         rt = asyncio.create_task(reader())
 
-        async def ping():
-            pending["p"] = time.perf_counter(); await ws.send("P")
+        async def ping(i):
+            pending[str(i)] = time.perf_counter(); await ws.send(f"P{i}")
 
-        for _ in range(10):
-            await ping(); await asyncio.sleep(0.1)
+        for i in range(10):
+            await ping(i); await asyncio.sleep(0.1)
         await asyncio.sleep(0.3)
         print(f"ping RTT ms: median {statistics.median(rtts):.1f}  max {max(rtts):.1f}  ({len(rtts)}/10 answered)")
         if dry:
@@ -89,7 +91,7 @@ async def run(host: str, dry: bool) -> None:
             v = tele.get("v", "?")
             print(f"    after {dur:.1f}s: vel {v}  height {tele.get('h')} mm  width {tele.get('w')} mm  "
                   f"pitch/roll {tele.get('pitch')}/{tele.get('roll')}°  gain {tele.get('gain')}  state {tele.get('state')}  "
-                  f"tick {tele.get('tick')} ms  net {tele.get('net')} ms"
+                  f"tick avg {tele.get('tick')} ms  net avg {tele.get('net')} ms  late {tele.get('late')}"
                   + (f"  | telemetry reacted after {first_change:.0f} ms" if first_change else ""))
         await ws.send("C rest"); await asyncio.sleep(3.0)
         print("\nfinal:", tele)

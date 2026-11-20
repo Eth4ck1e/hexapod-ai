@@ -44,6 +44,7 @@ struct NeuralCtl {
   char  label[40];
   // stats
   unsigned long ticks, late_ticks, max_tick_us, max_net_us;
+  float avg_tick_us, avg_net_us;            // exponential moving averages
 };
 
 static NeuralCtl nc;
@@ -149,7 +150,8 @@ static void ncHandle(char* line, float t) {
     Serial.print("  BLE "); Serial.print(gp_connected ? "connected" : "not connected"); Serial.print(", gamepad frames "); Serial.println(gp_frames);
     webStatus();
     Serial.print("  ticks "); Serial.print(nc.ticks); Serial.print("  late "); Serial.print(nc.late_ticks);
-    Serial.print("  max tick "); Serial.print(nc.max_tick_us / 1000.0f, 1); Serial.print(" ms  max network "); Serial.print(nc.max_net_us / 1000.0f, 2); Serial.println(" ms");
+    Serial.print("  tick avg/max "); Serial.print(nc.avg_tick_us / 1000.0f, 1); Serial.print("/"); Serial.print(nc.max_tick_us / 1000.0f, 1);
+    Serial.print(" ms  network avg/max "); Serial.print(nc.avg_net_us / 1000.0f, 2); Serial.print("/"); Serial.print(nc.max_net_us / 1000.0f, 2); Serial.println(" ms");
     ncPrintStance(); return;
   }
   if (!strcmp(v, "speed") && n > 1)    { nc.speed_frac = ncSpeedFrac(atof(tok[1])); Serial.print("  default speed "); Serial.print(nc.speed_frac, 2); Serial.println(" x max"); return; }
@@ -318,10 +320,10 @@ static void ncTelemetry(float t) {
   if (++nc.tele_ticks % 10 != 0 || !webConnected()) return;   // 5 Hz
   const char* state = nc.resting ? "resting" : nc.rest_pending ? "squatting" : nc.paused ? "home" : (nc.gain > 0.0f ? "walking" : "standing");
   char m[160];
-  snprintf(m, sizeof(m), "T %.3f %.3f %.2f %.0f %.0f %.1f %.1f %.2f %s %.1f %.2f %d",
+  snprintf(m, sizeof(m), "T %.3f %.3f %.2f %.0f %.0f %.1f %.1f %.2f %s %.1f %.2f %d %lu",
            nc.vel_now[0], nc.vel_now[1], nc.vel_now[2], -nc.dh * 1000.0f, nc.dw * 1000.0f,
-           nc.pitch * 57.2958f, nc.roll * 57.2958f, nc.gain, state, nc.max_tick_us / 1000.0f, nc.max_net_us / 1000.0f,
-           WiFi.status() == WL_CONNECTED ? (int)WiFi.RSSI() : 0);
+           nc.pitch * 57.2958f, nc.roll * 57.2958f, nc.gain, state, nc.avg_tick_us / 1000.0f, nc.avg_net_us / 1000.0f,
+           WiFi.status() == WL_CONNECTED ? (int)WiFi.RSSI() : 0, nc.late_ticks);
   webSend(m);
 }
 
@@ -373,6 +375,7 @@ static void ncTick(float t) {
     unsigned long n0 = micros();
     nc_policy(obs, pol);
     unsigned long n_us = micros() - n0; if (n_us > nc.max_net_us) nc.max_net_us = n_us;
+    nc.avg_net_us += 0.05f * ((float)n_us - nc.avg_net_us);
     for (int j = 0; j < 18; ++j) target[j] = nc.gain * pol[j] + (1.0f - nc.gain) * stance[j];
   } else {
     for (int j = 0; j < 18; ++j) target[j] = stance[j];
@@ -383,6 +386,7 @@ static void ncTick(float t) {
   }
   unsigned long us = micros() - t_us0;
   if (us > nc.max_tick_us) nc.max_tick_us = us;
+  nc.avg_tick_us += 0.05f * ((float)us - nc.avg_tick_us);
   ++nc.ticks;
 }
 

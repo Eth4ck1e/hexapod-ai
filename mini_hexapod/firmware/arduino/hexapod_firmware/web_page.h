@@ -58,5 +58,5 @@ document.getElementById('stand').onclick=()=>cmd('stand');document.getElementByI
 const spd=document.getElementById('spd');spd.oninput=()=>{st.spd=+spd.value;document.getElementById('spdv').textContent=spd.value+' ×'};
 setInterval(()=>{if(alive&&ws.bufferedAmount<200)ws.send('S '+[st.lx,st.ly,st.rx,st.ry].map(v=>v.toFixed(3)).join(' ')+' '+[st.sl,st.sr,st.up,st.dn,st.wd,st.nr].join(' ')+' '+st.spd)},50);
 function showTele(f){const c=(l,v)=>'<div><span>'+l+'</span>'+v+'</div>';
- tele.innerHTML=c('velocity m/s · rad/s',f[1]+' '+f[2]+' · '+f[3])+c('height · width mm',f[4]+' · '+f[5])+c('pitch · roll °',f[6]+' · '+f[7])+c('state',f[9]+' · net '+f[8])+c('tick · network ms',f[10]+' · '+f[11])+c('wifi rssi',f[12]);}
+ tele.innerHTML=c('velocity m/s · rad/s',f[1]+' '+f[2]+' · '+f[3])+c('height · width mm',f[4]+' · '+f[5])+c('pitch · roll °',f[6]+' · '+f[7])+c('state',f[9]+' · net '+f[8])+c('tick · network ms (avg)',f[10]+' · '+f[11])+c('wifi rssi · late ticks',f[12]+' · '+(f[13]||0));}
 </script></body></html>)HTML";

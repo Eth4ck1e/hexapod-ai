@@ -31,6 +31,8 @@ unsigned long web_msgs = 0; static bool web_activity = false;
 void webBegin() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP_STA);
+  WiFi.enableIPv6();                          // phone hotspots on IPv6-only carriers: the laptop can only reach us over v6
+  WiFi.setSleep(false);                       // modem power save costs ~100 ms per packet; this is a controller
   WiFi.softAP(AP_SSID, AP_PASS);
   Preferences wp; wp.begin("wifi", true);
   String ssid = wp.getString("ssid", ""), pass = wp.getString("pass", ""); wp.end();
@@ -79,17 +81,24 @@ void webScan() {
 void webStatus() {
   Serial.print("  WiFi AP "); Serial.print(AP_SSID); Serial.print(" @ "); Serial.print(WiFi.softAPIP());
   Serial.print(", "); Serial.print(WiFi.softAPgetStationNum()); Serial.print(" joined; STA ");
-  if (WiFi.status() == WL_CONNECTED) { Serial.print(WiFi.SSID()); Serial.print(" @ "); Serial.print(WiFi.localIP()); Serial.print(" rssi "); Serial.print(WiFi.RSSI()); }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print(WiFi.SSID()); Serial.print(" @ "); Serial.print(WiFi.localIP());
+    Serial.print(" v6 "); Serial.print(WiFi.linkLocalIPv6()); Serial.print(" / "); Serial.print(WiFi.globalIPv6());
+    Serial.print(" rssi "); Serial.print(WiFi.RSSI());
+  }
   else Serial.print("not connected");
   Serial.print("; page client "); Serial.print(web_ws.connected() ? "connected" : "none"); Serial.print(", msgs "); Serial.println(web_msgs);
 }
 
 static void wsSendRaw(const uint8_t* p, size_t n, uint8_t op) {
   if (!web_ws.connected()) return;
-  uint8_t h[4]; size_t hl;
-  h[0] = 0x80 | op;
-  if (n < 126) { h[1] = (uint8_t)n; hl = 2; } else { h[1] = 126; h[2] = (uint8_t)(n >> 8); h[3] = (uint8_t)n; hl = 4; }
-  web_ws.write(h, hl); if (n) web_ws.write(p, n);
+  static uint8_t buf[260];                     // one write per frame: two small writes + Nagle = 200 ms stalls
+  if (n > 250) n = 250;
+  size_t hl;
+  buf[0] = 0x80 | op;
+  if (n < 126) { buf[1] = (uint8_t)n; hl = 2; } else { buf[1] = 126; buf[2] = (uint8_t)(n >> 8); buf[3] = (uint8_t)n; hl = 4; }
+  memcpy(buf + hl, p, n);
+  web_ws.write(buf, hl + n);
 }
 void webSend(const char* s) { wsSendRaw((const uint8_t*)s, strlen(s), 0x1); }
 bool webConnected() { return web_ws.connected(); }
@@ -106,7 +115,7 @@ static void webHandleMsg(char* m) {
     if (web.lx || web.ly || web.rx || web.ry || web.sl || web.sr || web.up || web.dn || web.wd || web.nr) web_activity = true;
   } else if (m[0] == 'C' && m[1] == ' ') { strncpy(web_cmd, m + 2, sizeof(web_cmd) - 1); web_cmd[sizeof(web_cmd) - 1] = 0; web_has_cmd = true; web_activity = true; }
   else if (m[0] == 'L' && m[1] == ' ') { strncpy(web_line, m + 2, sizeof(web_line) - 1); web_line[sizeof(web_line) - 1] = 0; web_has_line = true; web_activity = true; }
-  else if (m[0] == 'P') webSend("P");
+  else if (m[0] == 'P') webSend(m);                                  // ping: echo (with its id)
 }
 
 static void wsHandshake(const String& req) {
@@ -143,6 +152,7 @@ void webPoll() {
         if (web_ws.connected()) web_ws.stop();           // one controller at a time: newest wins
         wsHandshake(http_req);
         web_ws = web_http; web_http = WiFiClient(); ws_len = 0;
+        web_ws.setNoDelay(true);                   // control stream: latency matters, not packet count
         webSend("M page connected");
       } else { webServePage(); web_http = WiFiClient(); }
     } else if (millis() - http_t0 > 3000) { web_http.stop(); web_http = WiFiClient(); }
