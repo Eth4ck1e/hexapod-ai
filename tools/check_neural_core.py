@@ -33,7 +33,9 @@ def main() -> None:
 
     header = (FW / "policy_weights.h").read_text()
     src = args.params or re.search(r"// source: (\S+)", header).group(1)
-    print(f"policy_weights.h built from {src}")
+    pitch_max = float(re.search(r"POLICY_PITCH_MAX (\S+)f", header).group(1))
+    roll_max = float(re.search(r"POLICY_ROLL_MAX (\S+)f", header).group(1))
+    print(f"policy_weights.h built from {src}  (tilt ±{np.degrees(pitch_max):.0f}°/±{np.degrees(roll_max):.0f}°)")
 
     import chain_train
     from drive_serial import hardware_obs, load_policy
@@ -64,6 +66,8 @@ def main() -> None:
             else:           cmd[0] = speed; cmd[2] = rng.choice([-1, 1]) * speed / rng.uniform(ctrl.MIN_TURN_RADIUS, ctrl.MAX_TURN_RADIUS)
             cmd[5] = rng.uniform(env.dh_min, env.dh_max)
             cmd[6] = rng.uniform(*env.safe_dw_range(cmd[5]))
+            if pitch_max > 0:
+                cmd[3] = rng.uniform(-pitch_max, pitch_max); cmd[4] = rng.uniform(-roll_max, roll_max)
             obs = hardware_obs(neutral, neutral, 0.005, np.zeros(18), phase, cmd, variant="hardware_pure")
             ref.append(neutral + np.tanh(infer(obs)) * scale)
             lines.append("P " + " ".join(f"{v:.8f}" for v in [phase, *cmd]))
@@ -73,13 +77,18 @@ def main() -> None:
                 c = np.zeros(9); c[5], c[6] = dh, dw
                 ref.append(ctrl.predict_with_feet(c, 0.0)[0])
                 lines.append(f"S {dh:.8f} {dw:.8f}")
+        for pitch, roll in ((0.17, 0.0), (0.0, -0.26), (0.1, 0.12), (-0.15, 0.2)):
+            for dh in (env.dh_min, 0.0, env.dh_max):
+                c = np.zeros(9); c[3], c[4], c[5] = pitch, roll, dh
+                ref.append(ctrl.predict_with_feet(c, 0.0)[0])
+                lines.append(f"T {dh:.8f} 0 {pitch:.8f} {roll:.8f}")
         out = subprocess.run([str(exe)], input="\n".join(lines) + "\n", capture_output=True, text=True, check=True).stdout
         got = np.array([[float(v) for v in ln.split()] for ln in out.strip().splitlines()])
     ref = np.array(ref)
     assert got.shape == ref.shape, (got.shape, ref.shape)
     d = np.abs(got - ref)
     print(f"policy: {n_pol} draws, max |Δjoint| {d[:n_pol].max():.2e} rad ({np.degrees(d[:n_pol].max()):.4f}°)")
-    print(f"stance: {len(ref) - n_pol} (dh, dw) points, max |Δjoint| {d[n_pol:].max():.2e} rad")
+    print(f"stance: {len(ref) - n_pol} (dh, dw, pitch, roll) points, max |Δjoint| {d[n_pol:].max():.2e} rad")
     ok = d[:n_pol].max() < 2e-4 and d[n_pol:].max() < 1e-5
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)

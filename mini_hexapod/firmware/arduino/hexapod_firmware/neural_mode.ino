@@ -17,6 +17,7 @@
 //   autorest SEC   squat + go limp after SEC idle (0 = off)
 //   stop | home | rest | stats | help | q
 #include "neural_core.h"
+#include "web_link.h"
 
 constexpr unsigned long NC_TICK_MS      = 20;      // one PCA9685 PWM frame
 constexpr float NC_DT                   = 0.020f;
@@ -29,11 +30,13 @@ constexpr float NC_SWEEP_DEFAULT_S      = 12.0f;
 struct NeuralCtl {
   float vel[3], vel_now[3];                 // commanded / ramped (vx, vy, wz)
   float dh, dw, dh_goal, dw_goal, dh_before_rest;
+  float pitch, roll, pitch_goal, roll_goal;  // body tilt (0 unless the policy was trained with it)
   float gain;                               // 1 = network, 0 = standing pose
   float speed_frac;
   float move_end_s, hold_until_s, idle_since_s;
   bool  sweep; float sweep_speed, sweep_dur;
-  bool  resting, rest_pending, paused, was_moving, gp_driving, gp_spin_hold;
+  bool  resting, rest_pending, paused, was_moving, gp_driving, gp_spin_hold, web_driving;
+  unsigned long tele_ticks;
   uint8_t gp_prev_stick;
   float gp_stick_vel[2], gp_stick_t;        // last non-zero stick command (for spin-while-walking)
   float auto_rest_s;
@@ -45,20 +48,28 @@ struct NeuralCtl {
 static NeuralCtl nc;
 static void ncWake(float t);
 
+// Print to the serial console AND mirror to the web page's log strip.
+static void ncSay(const char* msg) {
+  Serial.print("  "); Serial.println(msg);
+  char m[128]; snprintf(m, sizeof(m), "M %s", msg); webSend(m);
+}
+
 static void ncHelp() {
   Serial.println("  forward|back|left|right|fl|fr|bl|br [speed 0-1] [for SEC]   walk (default 5 s)");
   Serial.println("  spin left|right [scale] [for SEC]     arc left|right [speed] [for SEC]");
   Serial.println("  sweep [speed] [for SEC]               heading 0->360 deg while walking (12 s)");
   Serial.println("  up MM | down MM | wide MM | narrow MM  stance (persistent)   speed F   autorest SEC");
   Serial.println("  stop | home | rest | stats | help | q");
-  Serial.println("  phone: Dabble gamepad (joystick) -> stick walks, square/circle spin, triangle/cross body up/down,");
-  Serial.println("         start wakes + homes, select rests. Or any BLE serial app sending these words.");
+  Serial.println("  phone: join WiFi 'hexapod' / 'hexapod123', open http://192.168.4.1/  (web controller)");
+  Serial.println("         or Dabble gamepad over BLE, or any BLE serial app sending these words.");
+  Serial.println("  wifi SSID PASS   also join your own network (saved); 'wifi' shows addresses");
 }
 
 static void ncPrintStance() {
-  Serial.print("  stance height "); Serial.print(-nc.dh_goal * 1000.0f, 0);
-  Serial.print(" mm (range "); Serial.print(-POLICY_DH_MAX * 1000.0f, 0); Serial.print(".."); Serial.print(-POLICY_DH_MIN * 1000.0f, 0);
-  Serial.print(")  width "); Serial.print(nc.dw_goal * 1000.0f, 0); Serial.println(" mm");
+  char m[96];
+  snprintf(m, sizeof(m), "stance height %.0f mm (range %.0f..%.0f)  width %.0f mm", -nc.dh_goal * 1000.0f,
+           -POLICY_DH_MAX * 1000.0f, -POLICY_DH_MIN * 1000.0f, nc.dw_goal * 1000.0f);
+  ncSay(m);
 }
 
 static void ncRest(float t) {
@@ -68,7 +79,7 @@ static void ncRest(float t) {
   nc.dh_goal = POLICY_DH_MAX;
   nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal);
   nc.rest_pending = true;
-  Serial.print("  v resting: squatting "); Serial.print((POLICY_DH_MAX - nc.dh) * 1000.0f, 0); Serial.println(" mm, then servos go limp");
+  char m[96]; snprintf(m, sizeof(m), "v resting: squatting %.0f mm, then servos go limp", (POLICY_DH_MAX - nc.dh) * 1000.0f); ncSay(m);
 }
 
 static void ncStartMove(const float* vel, const char* label, float t, float dur) {
@@ -78,12 +89,12 @@ static void ncStartMove(const float* vel, const char* label, float t, float dur)
   nc.sweep = false;
   nc.paused = false;
   strncpy(nc.label, label, sizeof(nc.label) - 1); nc.label[sizeof(nc.label) - 1] = 0;
-  Serial.print("  > "); Serial.print(label); Serial.print(" for "); Serial.print(dur, 1); Serial.println(" s");
+  char m[96]; snprintf(m, sizeof(m), "> %s for %.1f s", label, dur); ncSay(m);
   if (nc.resting || nc.rest_pending) {            // stand back up first
     ncWake(t);
     float delay_s = nc.hold_until_s - t;
     nc.move_end_s += delay_s;
-    Serial.print("  ^ standing up ("); Serial.print(delay_s, 1); Serial.println(" s), then the move");
+    snprintf(m, sizeof(m), "^ standing up (%.1f s), then the move", delay_s); ncSay(m);
   }
 }
 
@@ -107,10 +118,14 @@ static float ncSpeedFrac(float frac) {
 
 static void ncHandle(char* line, float t) {
   char* tok[8]; int n = 0;
-  for (char* p = strtok(line, " \t"); p && n < 8; p = strtok(NULL, " \t")) { for (char* q = p; *q; ++q) *q = tolower(*q); tok[n++] = p; }
+  for (char* p = strtok(line, " \t"); p && n < 8; p = strtok(NULL, " \t")) tok[n++] = p;
   if (n == 0) return;
+  for (char* q = tok[0]; *q; ++q) *q = tolower(*q);
+  if (strcmp(tok[0], "wifi") != 0)                       // SSID / password keep their case
+    for (int i = 1; i < n; ++i) for (char* q = tok[i]; *q; ++q) *q = tolower(*q);
   const char* v = tok[0];
   float frac, dur;
+  if (!strcmp(v, "wifi")) { if (n >= 3) webSetWifi(tok[1], tok[2]); else webStatus(); return; }
 
   if (!strcmp(v, "help") || !strcmp(v, "?")) { ncHelp(); return; }
   if (!strcmp(v, "q") || !strcmp(v, "quit") || !strcmp(v, "exit") || !strcmp(v, "m")) {
@@ -121,6 +136,7 @@ static void ncHandle(char* line, float t) {
   if (!strcmp(v, "rest"))  { ncRest(t); return; }
   if (!strcmp(v, "stats")) {
     Serial.print("  BLE "); Serial.print(gp_connected ? "connected" : "not connected"); Serial.print(", gamepad frames "); Serial.println(gp_frames);
+    webStatus();
     Serial.print("  ticks "); Serial.print(nc.ticks); Serial.print("  late "); Serial.print(nc.late_ticks);
     Serial.print("  max tick "); Serial.print(nc.max_tick_us / 1000.0f, 1); Serial.print(" ms  max network "); Serial.print(nc.max_net_us / 1000.0f, 2); Serial.println(" ms");
     ncPrintStance(); return;
@@ -236,17 +252,81 @@ static void ncGamepad(float t) {
   }
 }
 
+// Web dashboard (wifi_web.ino). Everything arrives together in one 20 Hz message,
+// so stick + spin + stance buttons + tilt combine naturally. Held buttons ramp.
+static void ncWeb(float t) {
+  webPoll();
+  if (web_has_line) { web_has_line = false; Serial.print("  [web] "); Serial.println(web_line); ncHandle(web_line, t); }
+  if (web_has_cmd) {
+    web_has_cmd = false; Serial.print("  [web] "); Serial.println(web_cmd);
+    if (!strcmp(web_cmd, "stand"))      { ncWake(t); homeAll(); ncSay("stand: awake"); }
+    else if (!strcmp(web_cmd, "rest"))  ncRest(t);
+    else if (!strcmp(web_cmd, "stop"))  { nc.move_end_s = t; nc.sweep = false; nc.web_driving = false; }
+    else if (!strcmp(web_cmd, "home"))  { nc.move_end_s = t; nc.sweep = false; nc.paused = true; nc.resting = nc.rest_pending = false; homeAll(); ncSay("home pose"); }
+  }
+  if (!web.fresh) {
+    if (nc.web_driving && millis() - web.last_ms > 500) { nc.web_driving = false; nc.move_end_s = t; ncSay("web: control stream lost, stopping"); }
+    return;
+  }
+  web.fresh = false;
+  const float dtm = 0.05f;                                    // page sends at 20 Hz
+  if (web.up) nc.dh_goal -= NC_STANCE_RAMP_M_S * dtm;
+  if (web.dn) nc.dh_goal += NC_STANCE_RAMP_M_S * dtm;
+  nc.dh_goal = nc_clamp_dh(nc.dh_goal);
+  if (web.wd) nc.dw_goal += NC_STANCE_RAMP_M_S * dtm;
+  if (web.nr) nc.dw_goal -= NC_STANCE_RAMP_M_S * dtm;
+  nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal);
+  nc.pitch_goal = nc_clampf(web.ry, -1.0f, 1.0f) * POLICY_PITCH_MAX;   // stick up = nose up
+  nc.roll_goal  = nc_clampf(web.rx, -1.0f, 1.0f) * POLICY_ROLL_MAX;    // stick right = right side down (roll+ = left up)
+  bool stance_btn = web.up || web.dn || web.wd || web.nr || web.rx != 0.0f || web.ry != 0.0f;
+  if (stance_btn && (nc.resting || nc.rest_pending || nc.paused)) ncWake(t);
+  float mag = hypotf(web.lx, web.ly), vel[3] = {0, 0, 0};
+  bool stick = mag > 0.1f;
+  if (stick) {
+    if (mag > 1.0f) mag = 1.0f;
+    float top = nc_clampf(web.spd, POLICY_SPEED_MIN_FRAC, POLICY_SPEED_MAX_FRAC);
+    float frac = POLICY_SPEED_MIN_FRAC + (top - POLICY_SPEED_MIN_FRAC) * (mag - 0.1f) / 0.9f;
+    float sp = POLICY_MAX_SPEED * frac;
+    vel[0] = sp * web.ly / mag; vel[1] = -sp * web.lx / mag;          // page: x right, y up; robot: vx fwd, vy left
+  }
+  float yaw = (web.sl ? 1.0f : 0.0f) - (web.sr ? 1.0f : 0.0f);
+  vel[2] = yaw * POLICY_MAX_YAW_RATE * (stick ? 0.5f : 1.0f);
+  bool want = stick || yaw != 0.0f;
+  if (want) {
+    if (nc.resting || nc.rest_pending || nc.paused) ncWake(t);
+    for (int i = 0; i < 3; ++i) nc.vel[i] = vel[i];
+    nc.sweep = false; nc.label[0] = 0;
+    nc.move_end_s = t + 0.3f;
+    nc.web_driving = true;
+  } else if (nc.web_driving) { nc.web_driving = false; nc.move_end_s = t; }
+}
+
+static void ncTelemetry(float t) {
+  if (++nc.tele_ticks % 10 != 0 || !webConnected()) return;   // 5 Hz
+  const char* state = nc.resting ? "resting" : nc.rest_pending ? "squatting" : nc.paused ? "home" : (nc.gain > 0.0f ? "walking" : "standing");
+  char m[160];
+  snprintf(m, sizeof(m), "T %.3f %.3f %.2f %.0f %.0f %.1f %.1f %.2f %s %.1f %.2f %d",
+           nc.vel_now[0], nc.vel_now[1], nc.vel_now[2], -nc.dh * 1000.0f, nc.dw * 1000.0f,
+           nc.pitch * 57.2958f, nc.roll * 57.2958f, nc.gain, state, nc.max_tick_us / 1000.0f, nc.max_net_us / 1000.0f,
+           WiFi.status() == WL_CONNECTED ? (int)WiFi.RSSI() : 0);
+  webSend(m);
+}
+
 static void ncTick(float t) {
   unsigned long t_us0 = micros();
+  ncWeb(t);
   ncGamepad(t);
+  ncTelemetry(t);
   if (nc.label[0] && t >= nc.move_end_s) {
-    Serial.print("  # "); Serial.print(nc.label); Serial.println(" done, idle");
+    char m[64]; snprintf(m, sizeof(m), "# %s done, idle", nc.label); ncSay(m);
     nc.label[0] = 0;
   }
-  // Stance ramps.
-  float step = NC_STANCE_RAMP_M_S * NC_DT;
+  // Stance ramps (20 mm/s, 0.5 rad/s).
+  float step = NC_STANCE_RAMP_M_S * NC_DT, tstep = 0.5f * NC_DT;
   nc.dh += nc_clampf(nc.dh_goal - nc.dh, -step, step);
   nc.dw += nc_clampf(nc.dw_goal - nc.dw, -step, step);
+  nc.pitch += nc_clampf(nc_clampf(nc.pitch_goal, -POLICY_PITCH_MAX, POLICY_PITCH_MAX) - nc.pitch, -tstep, tstep);
+  nc.roll  += nc_clampf(nc_clampf(nc.roll_goal, -POLICY_ROLL_MAX, POLICY_ROLL_MAX) - nc.roll, -tstep, tstep);
 
   bool moving = nc.hold_until_s <= t && t < nc.move_end_s;
   if (nc.was_moving && !moving) nc.idle_since_s = t;
@@ -265,15 +345,15 @@ static void ncTick(float t) {
   bool idle = !moving && nc.gain <= 0.0f && nc.vel_now[0] == 0.0f && nc.vel_now[1] == 0.0f && nc.vel_now[2] == 0.0f;
   if (nc.rest_pending && idle && fabsf(nc.dh - nc.dh_goal) < 1e-4f) {
     relaxAll(); nc.rest_pending = false; nc.resting = true;
-    Serial.println("  # resting (servos limp). Any move stands the bot up.");
+    ncSay("# resting (servos limp). Any move stands the bot up.");
   }
   if (nc.auto_rest_s > 0.0f && idle && !nc.resting && !nc.rest_pending && !nc.paused && t - nc.idle_since_s > nc.auto_rest_s) ncRest(t);
   if (nc.resting || nc.paused) return;
 
   float target[18], stance[18];
-  nc_stance(nc.dh, nc.dw, stance);
+  nc_stance_tilt(nc.dh, nc.dw, nc.pitch, nc.roll, stance);
   if (nc.gain > 0.0f) {
-    float cmd[9] = {nc.vel_now[0], nc.vel_now[1], nc.vel_now[2], 0.0f, 0.0f, nc.dh, nc.dw, 0.0f, 0.0f};
+    float cmd[9] = {nc.vel_now[0], nc.vel_now[1], nc.vel_now[2], nc.pitch, nc.roll, nc.dh, nc.dw, 0.0f, 0.0f};
     float obs[POLICY_OBS_DIM], pol[18];
     float phase = fmodf(t / POLICY_GAIT_PERIOD_S, 1.0f);
     nc_build_obs(phase, cmd, obs);

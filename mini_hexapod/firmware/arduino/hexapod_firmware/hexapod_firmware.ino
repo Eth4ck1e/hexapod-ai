@@ -31,6 +31,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 #include <Preferences.h>
+#include <WiFi.h>            // web controller (wifi_web.ino); included here so the build sees it first
 #include <math.h>
 
 // ============================== HARDWARE ==============================
@@ -176,7 +177,7 @@ char readKey() {
       if (isWS(c)) continue;
       return c;
     }
-    if (current_mode == MODE_MAIN && bleWantsNeural()) return 'N';   // phone connected: go drive
+    if (current_mode == MODE_MAIN && (bleWantsNeural() || webWantsNeural())) return 'N';   // phone connected: go drive
     delay(5);
   }
 }
@@ -1459,7 +1460,7 @@ void runJsonMode() {
   Serial.println();
   Serial.println("BEGIN_JSON");
   Serial.println("{");
-  Serial.println("  \"firmware\": \"mini_hexapod unified v0.4\",");
+  Serial.println("  \"firmware\": \"mini_hexapod unified v0.5\",");
   Serial.print("  \"servo\": {\"min_us\": "); Serial.print(SERVO_MIN_US);
   Serial.print(", \"max_us\": "); Serial.print(SERVO_MAX_US);
   Serial.print(", \"us_per_deg\": "); Serial.print(US_PER_DEG, 4);
@@ -1596,7 +1597,7 @@ void setup() {
   delay(1000);
   Serial.println();
   Serial.println("==========================================");
-  Serial.println("  mini_hexapod unified firmware  v0.4");
+  Serial.println("  mini_hexapod unified firmware  v0.5");
   Serial.println("==========================================");
 
   Wire.begin();
@@ -1613,6 +1614,7 @@ void setup() {
 
   Serial.println("Loaded geometry, trims, signs, gait params, travel limits from NVS.");
   bleBegin();
+  webBegin();
   Serial.println("Tip: set Serial Monitor to 'Newline' line ending.");
 }
 

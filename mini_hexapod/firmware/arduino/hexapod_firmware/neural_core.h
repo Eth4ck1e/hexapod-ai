@@ -80,15 +80,36 @@ static void nc_ik_raw(float fx, float fy, float fz, float* coxa, float* femur, f
   *tibia = NC_PI - gamma;
 }
 
-// Standing pose at (dh, dw) -> joints[18] (sim convention/order).
-static void nc_stance(float dh, float dw, float joints[18]) {
+#ifndef POLICY_PITCH_MAX
+#define POLICY_PITCH_MAX 0.0f
+#define POLICY_ROLL_MAX 0.0f
+#endif
+
+// Standing pose at (dh, dw, pitch, roll) -> joints[18] (sim convention/order).
+// Tilt = gait/controller.py:_apply_tilt: coxa-local -> body, rotate by
+// R^-1 with R = R_y(-pitch)·R_x(roll) (pitch+ nose up, roll+ left side up), -> coxa-local.
+static void nc_stance_tilt(float dh, float dw, float pitch, float roll, float joints[18]) {
+  float cp = cosf(pitch), sp = sinf(pitch), cr = cosf(roll), sr = sinf(roll);
   for (int leg = 0; leg < 6; ++leg) {
     float fx = POLICY_FOOT_REST_COXA[leg * 3 + 0] + dw;
     float fy = POLICY_FOOT_REST_COXA[leg * 3 + 1];
     float fz = POLICY_FOOT_REST_COXA[leg * 3 + 2] + dh;
+    if (pitch != 0.0f || roll != 0.0f) {
+      float c = POLICY_LEG_YAW_C[leg], s = POLICY_LEG_YAW_S[leg];
+      float bx = c * fx - s * fy + POLICY_COXA_POS_BODY[leg * 3 + 0];          // coxa-local -> body
+      float by = s * fx + c * fy + POLICY_COXA_POS_BODY[leg * 3 + 1];
+      float bz = fz + POLICY_COXA_POS_BODY[leg * 3 + 2];
+      float tx = cp * bx + sp * bz;                                             // R^-1 rows
+      float ty = -sp * sr * bx + cr * by + cp * sr * bz;
+      float tz = -sp * cr * bx - sr * by + cp * cr * bz;
+      float rx = tx - POLICY_COXA_POS_BODY[leg * 3 + 0];                        // body -> coxa-local
+      float ry = ty - POLICY_COXA_POS_BODY[leg * 3 + 1];
+      fx = c * rx + s * ry; fy = -s * rx + c * ry; fz = tz - POLICY_COXA_POS_BODY[leg * 3 + 2];
+    }
     float raw[3];
     nc_ik_raw(fx, fy, fz, &raw[0], &raw[1], &raw[2]);
     for (int j = 0; j < 3; ++j)
       joints[leg * 3 + j] = POLICY_JOINT_SIGNS[leg * 3 + j] * raw[j] + POLICY_LEG_OFFSETS[leg * 3 + j];
   }
 }
+static void nc_stance(float dh, float dw, float joints[18]) { nc_stance_tilt(dh, dw, 0.0f, 0.0f, joints); }
