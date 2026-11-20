@@ -113,6 +113,7 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--csv", type=Path, default=None)
+    ap.add_argument("--cmd-mask", default="paper_stance", help="cmd slots sampled per episode (paper_tilt adds pitch/roll)")
     ap.add_argument("--action-space", choices=["foot", "joint"], default=None,
                     help="default: the chain_train session's ACTION_SPACE (HEXAPOD_ROBOT)")
     args = ap.parse_args()
@@ -139,7 +140,7 @@ def main() -> None:
     rows = []
     print(f"\n{'policy':>10} {'dr':>5} {'fall%':>7} {'done%':>7} {'r_lin':>7} {'r_ang':>7} {'alive':>7}")
     for dr in args.dr_scales:
-        params = hx.make_env_params(args.model, cmd_mask_name="paper_stance", dr_scale=dr)
+        params = hx.make_env_params(args.model, cmd_mask_name=args.cmd_mask, dr_scale=dr)
         env_obs = int(hx.reset(params, keys[0]).obs.shape[-1])
         for name, infer in policies:
             t0 = time.time()

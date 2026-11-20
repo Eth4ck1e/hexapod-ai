@@ -16,6 +16,7 @@
 #   STYLE_WEIGHT    λ_style                            (default 1.0)
 #   PY              python interpreter                 (default ~/.venv-mjx/bin/python)
 #   STAGES          subset to run, e.g. "priors bc"    (default "priors bc amp")
+#   BC_ARGS         extra pretrain_bc_jax.py flags, e.g. "--n-epochs 18"
 #   CMD_MASK        cmd slots sampled in every stage (default paper_stance; paper_tilt = + pitch/roll)
 #   DR_SCALE        dynamics domain randomization 0..1 (default 0 = nominal physics)
 #   LOG_STD         exploration log-std baked by BC (default -4.0; joint-target policies: -6)
@@ -141,7 +142,7 @@ if want bc; then
     log "STAGE 2/3  BC pretrain → $BC_DIR"
     run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
         "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask "$CMD_MASK" --action-space "$ACTION_SPACE" \
-        ${LOG_STD:+--log-std "$LOG_STD"} ${VALUE_EPOCHS:+--value-epochs "$VALUE_EPOCHS"} --out-dir "$BC_DIR"
+        ${LOG_STD:+--log-std "$LOG_STD"} ${VALUE_EPOCHS:+--value-epochs "$VALUE_EPOCHS"} ${BC_ARGS:-} --out-dir "$BC_DIR"
   fi
 fi
 
