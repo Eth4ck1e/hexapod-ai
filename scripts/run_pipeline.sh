@@ -50,6 +50,13 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 export HEXAPOD_ROBOT="${HEXAPOD_ROBOT:-phantomx}"
+# Persistent XLA compilation cache: every AMP segment is its own process compiling
+# the same graphs, and the compile is where host RSS spikes (11–20 GB observed on
+# joint-target graphs). With the cache only the first segment pays that peak.
+export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-$HOME/.cache/jax_xla}"
+export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS="${JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS:-0}"
+export JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES="${JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES:--1}"
+mkdir -p "$JAX_COMPILATION_CACHE_DIR"
 export PYTHONPATH=.
 TAG="${TAG:-v1}"
 PRIOR_STEPS="${PRIOR_STEPS:-250}"
