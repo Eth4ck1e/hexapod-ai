@@ -27,6 +27,14 @@ WebState web = {};
 char web_cmd[16]; bool web_has_cmd = false;
 char web_line[96]; bool web_has_line = false;
 unsigned long web_msgs = 0; static bool web_activity = false;
+static bool sta_wanted = false; static unsigned long sta_down_since = 0;
+constexpr unsigned long STA_GIVE_UP_MS = 15000;   // a STA retry loop hops channels and breaks the AP: give up on a missing network
+
+static void staStop(const char* why) {
+  WiFi.setAutoReconnect(false); WiFi.disconnect(false, true);
+  WiFi.mode(WIFI_AP); sta_wanted = false;
+  Serial.print("WiFi: STA off ("); Serial.print(why); Serial.println(") — access point only");
+}
 
 void webBegin() {
   WiFi.persistent(false);
@@ -36,15 +44,22 @@ void webBegin() {
   WiFi.softAP(AP_SSID, AP_PASS);
   Preferences wp; wp.begin("wifi", true);
   String ssid = wp.getString("ssid", ""), pass = wp.getString("pass", ""); wp.end();
-  if (ssid.length()) { WiFi.begin(ssid.c_str(), pass.c_str()); Serial.print("WiFi: joining '"); Serial.print(ssid); Serial.println("' (stored)"); }
+  if (ssid.length()) { WiFi.begin(ssid.c_str(), pass.c_str()); sta_wanted = true; sta_down_since = millis(); Serial.print("WiFi: joining '"); Serial.print(ssid); Serial.println("' (stored; gives up after 15 s)"); }
+  else WiFi.mode(WIFI_AP);
   web_server.begin();
   web_dns.start(53, "*", WiFi.softAPIP());
   Serial.print("WiFi: AP '"); Serial.print(AP_SSID); Serial.print("' pass '"); Serial.print(AP_PASS);
   Serial.print("' -> http://"); Serial.print(WiFi.softAPIP()); Serial.println("/  (web controller)");
 }
 
+void webForgetWifi() {
+  Preferences wp; wp.begin("wifi", false); wp.clear(); wp.end();
+  staStop("forgotten");
+}
+
 void webSetWifi(const char* ssid, const char* pass) {
   Preferences wp; wp.begin("wifi", false); wp.putString("ssid", ssid); wp.putString("pass", pass); wp.end();
+  sta_wanted = true; sta_down_since = millis();
   // A join already in progress rejects new credentials ("sta is connecting, cannot set
   // config"): restart the STA interface first.
   WiFi.setAutoReconnect(false); WiFi.disconnect(false, true);
@@ -141,6 +156,10 @@ static void webServePage() {
 // Call often (every tick, and while idling in the menu).
 void webPoll() {
   web_dns.processNextRequest();
+  if (sta_wanted) {
+    if (WiFi.status() == WL_CONNECTED) sta_down_since = millis();
+    else if (millis() - sta_down_since > STA_GIVE_UP_MS) staStop("network not found for 15 s");
+  }
   if (!web_http.connected()) {
     WiFiClient c = web_server.accept();
     if (c) { web_http = c; http_req = ""; http_t0 = millis(); }

@@ -64,7 +64,8 @@ static void ncHelp() {
   Serial.println("  stop | home | rest | stats | help | q");
   Serial.println("  phone: join WiFi 'hexapod' / 'hexapod123', open http://192.168.4.1/  (web controller)");
   Serial.println("         or Dabble gamepad over BLE, or any BLE serial app sending these words.");
-  Serial.println("  wifi \"Net Name\" PASS   also join your own network/hotspot (saved); 'wifi' shows addresses");
+  Serial.println("  wifi \"Net Name\" PASS   also join a network/hotspot (saved; given up after 15 s if absent)");
+  Serial.println("  wifi | wifi scan | wifi off   status / nearby networks / forget the network (AP only — use for the demo)");
 }
 
 static void ncPrintStance() {
@@ -125,6 +126,7 @@ static void ncHandle(char* line, float t) {
     char* rest = line + 4; while (*rest == ' ') ++rest;
     if (*rest == 0) { webStatus(); return; }
     if (!strcasecmp(rest, "scan")) { webScan(); return; }
+    if (!strcasecmp(rest, "off") || !strcasecmp(rest, "forget")) { webForgetWifi(); return; }
     char* sp = strrchr(rest, ' ');
     if (!sp) { Serial.println("  ? wifi SSID PASSWORD"); return; }
     *sp = 0; char* pass = sp + 1; while (*pass == ' ') ++pass;
