@@ -79,6 +79,9 @@ On stage, in this order (each step is a fallback for the next):
    8BitDo is paired.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
+5. **Between demos type `rest`** (or run with `--auto-rest 10`): the bot squats and
+   the servos go limp. The 9 g servos drift when they sit stalled and hot, so
+   standing powered for minutes visibly sags the stance; resting fixes it.
 
 Say out loud what the audience can and cannot see: the policy is a learned
 *correction* on top of the scaffold (±12 mm per foot), so a good result looks

@@ -295,6 +295,14 @@ void ensureDrivers() {
 
 void homeAll() { ensureDrivers(); for (uint8_t l = 0; l < 6; ++l) homeLeg(l); }
 
+// Cut the pulse on every channel: the servos go limp and stop drawing holding
+// current. The MS18s creep when they sit stalled under the body's weight and
+// heat up, so rest the bot (body lowered onto the table) between demos.
+void relaxAll() {
+  for (uint8_t l = 0; l < 6; ++l)
+    for (uint8_t j = 0; j < 3; ++j) driverFor(l).setPin(LEGS[l].channels[j], 0);
+}
+
 // =========================== NVS ===========================
 void resetGeometryToDefaults() {
   L2 = DEFAULT_L2;
@@ -457,6 +465,7 @@ void printMainMenu() {
   Serial.println("  X  export full config as C++");
   Serial.println("  J  export full config as JSON (for the simulator)");
   Serial.println("  C  I2C scan (are both PCA9685 boards answering?)");
+  Serial.println("  Z  relax: all servos limp (lower the body first!)");
   Serial.println("  R  reset all NVS to defaults (confirm)");
   Serial.println("  ?  reprint this menu");
   Serial.println("(within any mode: 'm' returns here)");
@@ -535,6 +544,7 @@ void handleMainMenu() {
         break;
       }
       case 'C': case 'c': i2cScan(); break;
+      case 'Z': case 'z': relaxAll(); Serial.println("relaxed — servos limp"); break;
       case '?': printMainMenu(); break;
       default:  break;
     }
@@ -1246,6 +1256,8 @@ void runRangeMode() {
 //                     simulator leg order RR RM RF LR LM LF, each leg
 //                     (coxa, femur, tibia). Applied immediately; replies "ok".
 //   H                 home all legs (trim pose)
+//   Z                 relax: all servos limp (host lowers the body first); the
+//                     idle watchdog stays quiet until the next frame
 //   Q                 leave stream mode
 // Safety: if no frame arrives for STREAM_TIMEOUT_MS the legs are homed and
 // a line "timeout" is printed; streaming resumes on the next frame.
@@ -1256,7 +1268,7 @@ const uint8_t SIM_TO_FW_LEG[6] = {2, 1, 0, 5, 4, 3};   // RR RM RF LR LM LF
 void runStreamMode() {
   Serial.println();
   Serial.println("=== POLICY STREAM ===");
-  Serial.println("Waiting for 'J a0 .. a17' frames (rad, sim order). 'H' home, 'Q' quit.");
+  Serial.println("Waiting for 'J a0 .. a17' frames (rad, sim order). 'H' home, 'Z' relax, 'Q' quit.");
   homeAll();
   unsigned long last_frame = millis();
   bool timed_out = false;
@@ -1274,6 +1286,7 @@ void runStreamMode() {
       char head = line.charAt(0);
       if (head == 'Q' || head == 'q' || head == 'm') { homeAll(); current_mode = MODE_MAIN; line = ""; return; }
       if (head == 'H' || head == 'h') { homeAll(); Serial.println("ok home"); line = ""; continue; }
+      if (head == 'Z' || head == 'z') { relaxAll(); timed_out = true; Serial.println("ok relax"); line = ""; continue; }
       if (head == 'J' || head == 'j') {
         float a[18];
         uint8_t n = 0;

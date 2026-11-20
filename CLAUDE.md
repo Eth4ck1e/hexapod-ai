@@ -453,7 +453,12 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   bot idles standing (scaffold at zero velocity is exactly still) with the policy
   residual faded out over 0.5 s because training never commanded < 40 % of max
   speed; stance height/width persist and ramp at 20 mm/s, clamped to the profile
-  envelope. On-device int8 inference stays a stretch goal.
+  envelope. `rest` squats to the lowest stance and sends firmware `Z` (all PWM
+  channels off → servos limp); `--auto-rest SEC` does it after idling. **Why:
+  the MS18s creep when held stalled under the body (heat drift, seen 2026-11-19
+  on FR + RL femurs: the home pose sags over a minute and recovers when
+  unloaded) — never leave the bot standing powered between demos.** On-device
+  int8 inference stays a stretch goal.
 - **Mini speed ladder** (`speed_levels` 0.5…3.0 in the profile) from
   `tools/calibrate_scaffold_speed.py` on the placeholder MJCF
   (`tools/scaffold_speed_calibration_mini.csv`); default gait unchanged

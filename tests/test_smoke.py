@@ -392,5 +392,13 @@ def test_drive_serial_console_source():
     assert src.paused and src.take_home_request() and not src.take_home_request()
     src.handle("back for 1", t=6.0)
     assert not src.paused
-    src.handle("quit", t=7.0)
+    src.handle("rest", t=7.0)                               # squat, then limp
+    for tt in (7.0, 7.5, 8.0, 8.5, 9.0, 9.5):
+        src(tt)
+    assert src.resting and src.paused and src.take_relax_request()
+    assert math.isclose(src.dh, src.env.dh_max)
+    src.handle("forward for 1", t=10.0)                     # stands up first, then walks
+    assert not src.resting and not src.paused
+    assert src(10.0)[0] == 0.0 and src.move_end > 11.0
+    src.handle("quit", t=12.0)
     assert src.done

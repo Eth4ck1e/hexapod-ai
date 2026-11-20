@@ -191,6 +191,8 @@ class ConsoleSource:
         wide MM | narrow MM        stance width, persistent, ramped
         speed F                    default speed fraction for following moves
         stop                       idle now        home   idle + firmware home pose
+        rest                       squat to the lowest stance, then cut the servo
+                                   pulses (limp) so they cool; any move stands up
         wait SEC                   (scripts) do nothing for SEC
         demo                       run the showcase schedule once
         help | quit
@@ -214,7 +216,8 @@ class ConsoleSource:
     HELP = __doc__
 
     def __init__(self, ctrl: Controller, default_duration: float = 5.0,
-                 script: str | None = None, speed_frac: float = 0.7, interactive: bool = True):
+                 script: str | None = None, speed_frac: float = 0.7, interactive: bool = True,
+                 auto_rest: float | None = None):
         import queue
         import threading
 
@@ -235,6 +238,13 @@ class ConsoleSource:
         self._gain = 0.0
         self.paused = False                           # True after `home`: stop streaming frames
         self.home_request = False
+        self.relax_request = False
+        self.resting = False                          # servos limp
+        self._rest_pending = False                    # squatting, relax when the ramp arrives
+        self._dh_before_rest = 0.0
+        self.auto_rest = auto_rest                    # seconds of idle before resting on its own
+        self._idle_since: float | None = None
+        self._hold_until = -1.0                       # stand up fully before the first move after a rest
         self.done = False
         self.demo: DemoSource | None = None
         self.demo_t0 = 0.0
@@ -297,7 +307,10 @@ class ConsoleSource:
                 print("  ■ idle")
             elif verb == "home":
                 self.move_end = t; self.demo = None; self.paused = True; self.home_request = True
+                self.resting = self._rest_pending = False
                 print("  ■ home (streaming paused until the next move)")
+            elif verb == "rest":
+                self._begin_rest(t)
             elif verb == "wait":
                 self._wait_until = t + float(toks[1])
             elif verb == "speed":
@@ -343,15 +356,46 @@ class ConsoleSource:
             print(f"  ? {line!r}: {e}")
         if self.paused and (self.move_end > t or self.demo is not None):
             self.paused = False
+            if self.resting or self._rest_pending:        # stand back up to the stance we had
+                self.resting = self._rest_pending = False
+                if self.resting is False and self.dh_goal == self.env.dh_max:
+                    self.dh_goal = self._dh_before_rest
+                delay = abs(self.dh - self.dh_goal) / (self.RAMP_MM_S / 1000.0) + 0.3
+                self._hold_until = t + delay                 # finish standing, then start the move
+                self.move_end += delay
+                if self.demo is not None:
+                    self.demo_t0 += delay
+                print(f"  ▲ standing up ({delay:.1f} s), then the move")
+
+    def _begin_rest(self, t: float) -> None:
+        if self.resting or self._rest_pending:
+            return
+        self.move_end = t; self.demo = None
+        self._dh_before_rest = self.dh_goal
+        self.dh_goal = self.env.dh_max                # squat as low as the envelope allows
+        self._rest_pending = True
+        print(f"  ▼ resting: squatting {(self.env.dh_max - self.dh) * 1000:.0f} mm, then servos go limp")
 
     # -- per-tick ------------------------------------------------------------
     def _poll(self, t: float) -> None:
         while not self.queue.empty():
             self.handle(self.queue.get(), t)
         idle = self.move_end <= t and self.demo is None and t >= self._wait_until
+        if self._rest_pending and abs(self.dh - self.dh_goal) < 1e-4 and self._gain <= 0.0:
+            self._rest_pending = False; self.resting = True
+            self.paused = True; self.relax_request = True
+            print("  ■ resting (servos limp). Any move stands the bot up.")
+        if self.auto_rest is not None and not (self.resting or self._rest_pending or self.paused):
+            if idle and not self.script:
+                if self._idle_since is None:
+                    self._idle_since = t
+                elif t - self._idle_since >= self.auto_rest:
+                    self._begin_rest(t)
+            else:
+                self._idle_since = None
         if idle and self.script:
             self.handle(self.script.pop(0), t)
-        elif idle and not self.script and not self.interactive and self._gain <= 0.0:
+        elif idle and not self.script and not self.interactive and self._gain <= 0.0 and not self._rest_pending:
             self.done = True                      # scripted, non-interactive run: finished
 
     def __call__(self, t: float) -> np.ndarray:
@@ -365,11 +409,13 @@ class ConsoleSource:
         if self.demo is not None:
             if t >= self.move_end:
                 self.demo = None; print("  ■ demo done, idle")
+            elif t < self._hold_until:
+                pass                                   # still standing up
             else:
                 cmd = self.demo(t - self.demo_t0).copy()
                 self._gain = min(1.0, self._gain + dt / self.FADE_S)
                 return cmd
-        moving = t < self.move_end
+        moving = self._hold_until <= t < self.move_end
         self._gain = min(1.0, self._gain + dt / self.FADE_S) if moving else max(0.0, self._gain - dt / self.FADE_S)
         cmd = np.zeros(9, dtype=np.float32)
         if moving:
@@ -382,6 +428,10 @@ class ConsoleSource:
 
     def take_home_request(self) -> bool:
         r = self.home_request; self.home_request = False
+        return r
+
+    def take_relax_request(self) -> bool:
+        r = self.relax_request; self.relax_request = False
         return r
 
 
@@ -427,6 +477,10 @@ class Link:
         if self.ser is not None:
             self.ser.write(b"H\n")
 
+    def relax(self) -> None:
+        if self.ser is not None:
+            self.ser.write(b"Z\n")
+
     def send(self, joints: np.ndarray) -> None:
         frame = "J " + " ".join(f"{a:.4f}" for a in joints) + "\n"
         if self.ser is None:
@@ -452,6 +506,8 @@ def main() -> None:
     p.add_argument("--script", default=None, help="console: file of commands, one per line (# comments)")
     p.add_argument("--default-duration", type=float, default=5.0, help="console: seconds per move without 'for'")
     p.add_argument("--speed-frac", type=float, default=None, help="console: default speed fraction of MAX_SPEED")
+    p.add_argument("--auto-rest", type=float, default=None,
+                   help="console: after this many idle seconds squat and go limp so the servos cool")
     p.add_argument("--demo", default="showcase")
     p.add_argument("--cmd", type=float, nargs=3, default=(0.04, 0.0, 0.0), metavar=("VX", "VY", "WZ"))
     p.add_argument("--calibration", default=None, help="controller calibration json")
@@ -484,7 +540,8 @@ def main() -> None:
         source = HoldSource(*args.cmd)
     elif args.source == "console":
         source = ConsoleSource(ctrl, args.default_duration, args.script, args.speed_frac,
-                               interactive=sys.stdin.isatty() or args.script is None)
+                               interactive=sys.stdin.isatty() or args.script is None,
+                               auto_rest=args.auto_rest)
     else:
         source = GamepadSource(ctrl, args.calibration)
 
@@ -533,6 +590,8 @@ def main() -> None:
 
             if hasattr(source, "take_home_request") and source.take_home_request():
                 link.home()
+            if hasattr(source, "take_relax_request") and source.take_relax_request():
+                link.relax()
             paused = getattr(source, "paused", False)
             if k % send_every == 0:
                 sent = target
