@@ -397,9 +397,21 @@ class Link:
             self.ser = serial.Serial(port, baud, timeout=0.02)
             time.sleep(0.3)
             self.ser.reset_input_buffer()
-            self.ser.write(b"P\n")                 # enter stream mode from the main menu
+            self.ser.write(b"m\n")                 # back to the main menu whatever mode the bot is in
             time.sleep(0.3)
-            self.drain(verbose=True)
+            self.ser.reset_input_buffer()
+            self.ser.write(b"P\n")                 # enter stream mode
+            # Wait for the firmware's ready line before the first frame; sending
+            # earlier can truncate frame 1 ("err n=16") while the banner prints.
+            t0, seen = time.time(), ""
+            while time.time() - t0 < 3.0 and "frames" not in seen:
+                seen += self.ser.read(self.ser.in_waiting or 1).decode(errors="replace")
+            for line in seen.splitlines():
+                if line.strip():
+                    print(f"  bot: {line.strip()}")
+            if "frames" not in seen:
+                print("WARNING: bot did not confirm stream mode (firmware menu 'P')")
+            time.sleep(0.1)
 
     def drain(self, verbose: bool = False) -> None:
         if self.ser is None:

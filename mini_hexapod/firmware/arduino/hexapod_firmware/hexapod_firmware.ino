@@ -264,7 +264,32 @@ void computeHomeKinAngles() {
 }
 
 void homeLeg(uint8_t leg) { for (uint8_t j = 0; j < 3; ++j) cmdJointTrim(leg, j); }
-void homeAll() { for (uint8_t l = 0; l < 6; ++l) homeLeg(l); }
+// A PCA9685 powers up in SLEEP with its outputs off and only becomes usable
+// after begin()/setPWMFreq(). On this bot the LEFT driver's logic is fed from
+// the servo rail, so if the servos are switched on after the XIAO booted that
+// board missed its init and one side simply never moves. Check MODE1's SLEEP
+// bit before every home and re-init whatever needs it.
+void initDriver(Adafruit_PWMServoDriver& d) {
+  d.begin();
+  d.setOscillatorFrequency(27000000);
+  d.setPWMFreq(PWM_FREQ_HZ);
+}
+
+bool driverAsleep(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  Wire.write((uint8_t)0x00);                     // MODE1
+  if (Wire.endTransmission(false) != 0) return true;   // no ack = treat as needing init
+  if (Wire.requestFrom((int)addr, 1) != 1) return true;
+  uint8_t mode1 = Wire.read();
+  return (mode1 & 0x10) != 0;                    // SLEEP bit
+}
+
+void ensureDrivers() {
+  if (driverAsleep(ADDR_RIGHT)) { initDriver(pwm_right); Serial.println("(re-initialised RIGHT PCA9685)"); }
+  if (driverAsleep(ADDR_LEFT))  { initDriver(pwm_left);  Serial.println("(re-initialised LEFT PCA9685)"); }
+}
+
+void homeAll() { ensureDrivers(); for (uint8_t l = 0; l < 6; ++l) homeLeg(l); }
 
 // =========================== NVS ===========================
 void resetGeometryToDefaults() {
@@ -1551,12 +1576,8 @@ void setup() {
   Serial.println("==========================================");
 
   Wire.begin();
-  pwm_right.begin();
-  pwm_right.setOscillatorFrequency(27000000);
-  pwm_right.setPWMFreq(PWM_FREQ_HZ);
-  pwm_left.begin();
-  pwm_left.setOscillatorFrequency(27000000);
-  pwm_left.setPWMFreq(PWM_FREQ_HZ);
+  initDriver(pwm_right);
+  initDriver(pwm_left);
   delay(200);
 
   loadGeometry();
