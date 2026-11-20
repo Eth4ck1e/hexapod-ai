@@ -63,7 +63,7 @@ static void ncHelp() {
   Serial.println("  stop | home | rest | stats | help | q");
   Serial.println("  phone: join WiFi 'hexapod' / 'hexapod123', open http://192.168.4.1/  (web controller)");
   Serial.println("         or Dabble gamepad over BLE, or any BLE serial app sending these words.");
-  Serial.println("  wifi SSID PASS   also join your own network (saved); 'wifi' shows addresses");
+  Serial.println("  wifi \"Net Name\" PASS   also join your own network/hotspot (saved); 'wifi' shows addresses");
 }
 
 static void ncPrintStance() {
@@ -118,15 +118,24 @@ static float ncSpeedFrac(float frac) {
 }
 
 static void ncHandle(char* line, float t) {
+  // wifi "Network Name" password   |   wifi NetworkName password   |   wifi   (status)
+  // SSID may be quoted (spaces, apostrophes); the password is the last word.
+  if (!strncasecmp(line, "wifi", 4) && (line[4] == 0 || line[4] == ' ')) {
+    char* rest = line + 4; while (*rest == ' ') ++rest;
+    if (*rest == 0) { webStatus(); return; }
+    char* sp = strrchr(rest, ' ');
+    if (!sp) { Serial.println("  ? wifi SSID PASSWORD"); return; }
+    *sp = 0; char* pass = sp + 1; while (*pass == ' ') ++pass;
+    char* ssid = rest; size_t L = strlen(ssid);
+    while (L && ssid[L - 1] == ' ') ssid[--L] = 0;
+    if (L >= 2 && (ssid[0] == '"' || ssid[0] == '\'') && ssid[L - 1] == ssid[0]) { ssid[L - 1] = 0; ++ssid; }
+    webSetWifi(ssid, pass); return;
+  }
   char* tok[8]; int n = 0;
-  for (char* p = strtok(line, " \t"); p && n < 8; p = strtok(NULL, " \t")) tok[n++] = p;
+  for (char* p = strtok(line, " \t"); p && n < 8; p = strtok(NULL, " \t")) { for (char* q = p; *q; ++q) *q = tolower(*q); tok[n++] = p; }
   if (n == 0) return;
-  for (char* q = tok[0]; *q; ++q) *q = tolower(*q);
-  if (strcmp(tok[0], "wifi") != 0)                       // SSID / password keep their case
-    for (int i = 1; i < n; ++i) for (char* q = tok[i]; *q; ++q) *q = tolower(*q);
   const char* v = tok[0];
   float frac, dur;
-  if (!strcmp(v, "wifi")) { if (n >= 3) webSetWifi(tok[1], tok[2]); else webStatus(); return; }
 
   if (!strcmp(v, "help") || !strcmp(v, "?")) { ncHelp(); return; }
   if (!strcmp(v, "q") || !strcmp(v, "quit") || !strcmp(v, "exit") || !strcmp(v, "m")) {
