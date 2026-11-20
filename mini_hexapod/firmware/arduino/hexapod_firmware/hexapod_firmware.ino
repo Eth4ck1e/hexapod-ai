@@ -176,6 +176,7 @@ char readKey() {
       if (isWS(c)) continue;
       return c;
     }
+    if (current_mode == MODE_MAIN && bleWantsNeural()) return 'N';   // phone connected: go drive
     delay(5);
   }
 }
@@ -1611,6 +1612,7 @@ void setup() {
   computeHomeKinAngles();
 
   Serial.println("Loaded geometry, trims, signs, gait params, travel limits from NVS.");
+  bleBegin();
   Serial.println("Tip: set Serial Monitor to 'Newline' line ending.");
 }
 

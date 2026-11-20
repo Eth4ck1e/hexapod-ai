@@ -33,7 +33,7 @@ struct NeuralCtl {
   float speed_frac;
   float move_end_s, hold_until_s, idle_since_s;
   bool  sweep; float sweep_speed, sweep_dur;
-  bool  resting, rest_pending, paused;
+  bool  resting, rest_pending, paused, was_moving, gp_driving;
   float auto_rest_s;
   char  label[40];
   // stats
@@ -41,6 +41,7 @@ struct NeuralCtl {
 };
 
 static NeuralCtl nc;
+static void ncWake(float t);
 
 static void ncHelp() {
   Serial.println("  forward|back|left|right|fl|fr|bl|br [speed 0-1] [for SEC]   walk (default 5 s)");
@@ -48,6 +49,8 @@ static void ncHelp() {
   Serial.println("  sweep [speed] [for SEC]               heading 0->360 deg while walking (12 s)");
   Serial.println("  up MM | down MM | wide MM | narrow MM  stance (persistent)   speed F   autorest SEC");
   Serial.println("  stop | home | rest | stats | help | q");
+  Serial.println("  phone: Dabble gamepad (joystick) -> stick walks, square/circle spin, triangle/cross body up/down,");
+  Serial.println("         start wakes + homes, select rests. Or any BLE serial app sending these words.");
 }
 
 static void ncPrintStance() {
@@ -75,11 +78,8 @@ static void ncStartMove(const float* vel, const char* label, float t, float dur)
   strncpy(nc.label, label, sizeof(nc.label) - 1); nc.label[sizeof(nc.label) - 1] = 0;
   Serial.print("  > "); Serial.print(label); Serial.print(" for "); Serial.print(dur, 1); Serial.println(" s");
   if (nc.resting || nc.rest_pending) {            // stand back up first
-    nc.resting = nc.rest_pending = false;
-    if (nc.dh_goal == POLICY_DH_MAX) nc.dh_goal = nc.dh_before_rest;
-    nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal);
-    float delay_s = fabsf(nc.dh - nc.dh_goal) / NC_STANCE_RAMP_M_S + 0.3f;
-    nc.hold_until_s = t + delay_s;
+    ncWake(t);
+    float delay_s = nc.hold_until_s - t;
     nc.move_end_s += delay_s;
     Serial.print("  ^ standing up ("); Serial.print(delay_s, 1); Serial.println(" s), then the move");
   }
@@ -118,6 +118,7 @@ static void ncHandle(char* line, float t) {
   if (!strcmp(v, "home"))  { nc.move_end_s = t; nc.sweep = false; nc.paused = true; nc.resting = nc.rest_pending = false; homeAll(); Serial.println("  home pose (any move resumes the controller)"); return; }
   if (!strcmp(v, "rest"))  { ncRest(t); return; }
   if (!strcmp(v, "stats")) {
+    Serial.print("  BLE "); Serial.print(gp_connected ? "connected" : "not connected"); Serial.print(", gamepad frames "); Serial.println(gp_frames);
     Serial.print("  ticks "); Serial.print(nc.ticks); Serial.print("  late "); Serial.print(nc.late_ticks);
     Serial.print("  max tick "); Serial.print(nc.max_tick_us / 1000.0f, 1); Serial.print(" ms  max network "); Serial.print(nc.max_net_us / 1000.0f, 2); Serial.println(" ms");
     ncPrintStance(); return;
@@ -174,11 +175,53 @@ static void ncHandle(char* line, float t) {
   Serial.print("  ? unknown command '"); Serial.print(v); Serial.println("' — 'help' lists the grammar");
 }
 
+// Stand up from rest / unpause so the next command can run.
+static void ncWake(float t) {
+  nc.paused = false;
+  if (nc.resting || nc.rest_pending) {
+    nc.resting = nc.rest_pending = false;
+    if (nc.dh_goal == POLICY_DH_MAX) nc.dh_goal = nc.dh_before_rest;
+    nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal);
+    nc.hold_until_s = t + fabsf(nc.dh - nc.dh_goal) / NC_STANCE_RAMP_M_S + 0.3f;
+  }
+}
+
+// Dabble gamepad (ble_dabble.ino): stick = heading + speed, square/circle = spin
+// left/right (combine with the stick for an arc), triangle/cross = body up/down
+// 5 mm per press, start = wake + home, select = rest. Continuous: the held state
+// is re-applied every tick, so the command stream is as live as the stick.
+static void ncGamepad(float t) {
+  bleDrain();
+  if (!gp_connected && !gp_fresh) return;
+  gp_fresh = false;
+  uint8_t pressed = gp_buttons & ~gp_prev_buttons; gp_prev_buttons = gp_buttons;
+  if (pressed & 0x01) { ncWake(t); homeAll(); Serial.println("  [pad] start: awake"); }                 // start
+  if (pressed & 0x02) { ncRest(t); Serial.println("  [pad] select: rest"); }                             // select
+  if (pressed & 0x04) { nc.dh_goal = nc_clamp_dh(nc.dh_goal - 0.005f); nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal); ncWake(t); ncPrintStance(); }  // triangle
+  if (pressed & 0x10) { nc.dh_goal = nc_clamp_dh(nc.dh_goal + 0.005f); nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal); ncWake(t); ncPrintStance(); }  // cross
+  float frac, heading, vel[3] = {0, 0, 0};
+  bool stick = gpStick(&frac, &heading);
+  if (stick) { float sp = POLICY_MAX_SPEED * frac; vel[0] = sp * cosf(heading); vel[1] = sp * sinf(heading); }
+  if (gp_buttons & 0x20) vel[2] += POLICY_MAX_YAW_RATE;                                                  // square
+  if (gp_buttons & 0x08) vel[2] -= POLICY_MAX_YAW_RATE;                                                  // circle
+  bool want = stick || (vel[2] != 0.0f);
+  if (want) {
+    if (nc.resting || nc.rest_pending || nc.paused) ncWake(t);
+    for (int i = 0; i < 3; ++i) nc.vel[i] = vel[i];
+    nc.sweep = false; nc.label[0] = 0;
+    nc.move_end_s = t + 0.3f;             // refreshed every tick while held; ramps down 0.3 s after release
+    nc.gp_driving = true;
+  } else if (nc.gp_driving) {
+    nc.gp_driving = false; nc.move_end_s = t;
+  }
+}
+
 static void ncTick(float t) {
   unsigned long t_us0 = micros();
+  ncGamepad(t);
   if (nc.label[0] && t >= nc.move_end_s) {
     Serial.print("  # "); Serial.print(nc.label); Serial.println(" done, idle");
-    nc.label[0] = 0; nc.idle_since_s = t;
+    nc.label[0] = 0;
   }
   // Stance ramps.
   float step = NC_STANCE_RAMP_M_S * NC_DT;
@@ -186,6 +229,8 @@ static void ncTick(float t) {
   nc.dw += nc_clampf(nc.dw_goal - nc.dw, -step, step);
 
   bool moving = nc.hold_until_s <= t && t < nc.move_end_s;
+  if (nc.was_moving && !moving) nc.idle_since_s = t;
+  nc.was_moving = moving;
   nc.gain = moving ? fminf(1.0f, nc.gain + NC_DT / NC_FADE_S) : fmaxf(0.0f, nc.gain - NC_DT / NC_FADE_S);
   if (moving && nc.sweep) {
     float h = 2.0f * NC_PI * (t - (nc.move_end_s - nc.sweep_dur)) / nc.sweep_dur;
@@ -248,6 +293,13 @@ void runNeuralMode() {
       if (ch != '\n') { if (len < sizeof(line) - 1) line[len++] = ch; continue; }
       line[len] = 0; len = 0;
       ncHandle(line, (millis() - t0) * 0.001f);
+      if (current_mode != MODE_NEURAL) return;
+    }
+    static char bline[96];
+    bleDrain();
+    if (bleTakeLine(bline, sizeof(bline))) {
+      Serial.print("  [ble] "); Serial.println(bline);
+      ncHandle(bline, (millis() - t0) * 0.001f);
       if (current_mode != MODE_NEURAL) return;
     }
     unsigned long now = millis();
