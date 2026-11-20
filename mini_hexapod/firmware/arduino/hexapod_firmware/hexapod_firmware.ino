@@ -472,7 +472,8 @@ void i2cScan() {
     }
   }
   if (n == 0) Serial.println("  nothing answered — check SDA/SCL wiring and driver power");
-  if (n > 8)  Serial.println("  (>8 'devices' = SDA held low, not real devices)");
+  if (n > 8)  Serial.println("  (>8 'devices' = bus noise, not real devices. Seen on the S3 right after the servo rail"
+                             " powered the PCA9685s and before their first write: home the legs (H) and scan again.)");
   Serial.println("scan done");
 }
 
