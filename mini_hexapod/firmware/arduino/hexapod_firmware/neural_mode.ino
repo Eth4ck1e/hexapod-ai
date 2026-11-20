@@ -33,7 +33,9 @@ struct NeuralCtl {
   float speed_frac;
   float move_end_s, hold_until_s, idle_since_s;
   bool  sweep; float sweep_speed, sweep_dur;
-  bool  resting, rest_pending, paused, was_moving, gp_driving;
+  bool  resting, rest_pending, paused, was_moving, gp_driving, gp_spin_hold;
+  uint8_t gp_prev_stick;
+  float gp_stick_vel[2], gp_stick_t;        // last non-zero stick command (for spin-while-walking)
   float auto_rest_s;
   char  label[40];
   // stats
@@ -194,16 +196,34 @@ static void ncGamepad(float t) {
   bleDrain();
   if (!gp_connected && !gp_fresh) return;
   gp_fresh = false;
-  uint8_t pressed = gp_buttons & ~gp_prev_buttons; gp_prev_buttons = gp_buttons;
+  uint8_t pressed = gp_buttons & ~gp_prev_buttons;
+  if (gp_buttons != gp_prev_buttons || gp_stick != nc.gp_prev_stick) {        // log every change
+    static const char* names[6] = {"start", "select", "triangle", "circle", "cross", "square"};
+    Serial.print("  [pad] t="); Serial.print(t, 2); Serial.print(" buttons=0x"); Serial.print(gp_buttons, HEX);
+    for (int b = 0; b < 6; ++b) if (gp_buttons & (1 << b)) { Serial.print(' '); Serial.print(names[b]); }
+    Serial.print("  stick angle="); Serial.print((gp_stick >> 3) * 15); Serial.print(" r="); Serial.print(gp_stick & 7);
+    Serial.print(" mode="); Serial.println(gp_mode);
+  }
+  gp_prev_buttons = gp_buttons; nc.gp_prev_stick = gp_stick;
   if (pressed & 0x01) { ncWake(t); homeAll(); Serial.println("  [pad] start: awake"); }                 // start
   if (pressed & 0x02) { ncRest(t); Serial.println("  [pad] select: rest"); }                             // select
   if (pressed & 0x04) { nc.dh_goal = nc_clamp_dh(nc.dh_goal - 0.005f); nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal); ncWake(t); ncPrintStance(); }  // triangle
   if (pressed & 0x10) { nc.dh_goal = nc_clamp_dh(nc.dh_goal + 0.005f); nc.dw_goal = nc_clamp_dw(nc.dh_goal, nc.dw_goal); ncWake(t); ncPrintStance(); }  // cross
   float frac, heading, vel[3] = {0, 0, 0};
   bool stick = gpStick(&frac, &heading);
-  if (stick) { float sp = POLICY_MAX_SPEED * frac; vel[0] = sp * cosf(heading); vel[1] = sp * sinf(heading); }
+  bool spin = (gp_buttons & 0x28) != 0;                                                                  // square | circle
+  if (stick) {
+    float sp = POLICY_MAX_SPEED * frac; vel[0] = sp * cosf(heading); vel[1] = sp * sinf(heading);
+    nc.gp_stick_vel[0] = vel[0]; nc.gp_stick_vel[1] = vel[1]; nc.gp_stick_t = t;
+  } else if (spin && nc.gp_stick_t > 0.0f && (nc.gp_spin_hold || t - nc.gp_stick_t < 0.6f)) {
+    // The app reports only one control at a time: a spin button press zeroes the
+    // stick. Keep the last stick vector while the button is held -> arc turn.
+    vel[0] = nc.gp_stick_vel[0]; vel[1] = nc.gp_stick_vel[1]; stick = true;
+  }
+  nc.gp_spin_hold = spin && stick;
   if (gp_buttons & 0x20) vel[2] += POLICY_MAX_YAW_RATE;                                                  // square
   if (gp_buttons & 0x08) vel[2] -= POLICY_MAX_YAW_RATE;                                                  // circle
+  if (spin && stick) vel[2] *= 0.5f;                                                                     // arc: half yaw rate
   bool want = stick || (vel[2] != 0.0f);
   if (want) {
     if (nc.resting || nc.rest_pending || nc.paused) ncWake(t);
