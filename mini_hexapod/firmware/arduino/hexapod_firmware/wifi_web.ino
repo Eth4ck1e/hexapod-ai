@@ -47,6 +47,30 @@ void webSetWifi(const char* ssid, const char* pass) {
   Serial.print("WiFi: joining '"); Serial.print(ssid); Serial.println("' (saved; 'wifi' alone shows the address once connected)");
 }
 
+// List nearby networks (blocks ~2 s; use while standing). Prints the SSID bytes exactly
+// as broadcast, so names with curly apostrophes etc. can be copied for `wifi`.
+void webScan() {
+  Serial.println("  scanning...");
+  // A pending join makes scanNetworks() fail (-2, "sta is connecting") and disconnect()
+  // alone does not stop the driver's retry loop: drop the STA interface and bring it back.
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, true);
+  WiFi.mode(WIFI_AP); delay(400);
+  WiFi.mode(WIFI_AP_STA); delay(400);
+  int n = WiFi.scanNetworks(false, false, false, 300);
+  for (int i = 0; i < n; ++i) {
+    Serial.print("  "); Serial.print(WiFi.RSSI(i)); Serial.print(" dBm  ");
+    Serial.print(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "open   " : "secured");
+    Serial.print("  \""); Serial.print(WiFi.SSID(i)); Serial.println("\"");
+  }
+  WiFi.scanDelete();
+  Serial.print("  "); Serial.print(n); Serial.println(" networks");
+  Preferences wp; wp.begin("wifi", true);
+  String ssid = wp.getString("ssid", ""), pass = wp.getString("pass", ""); wp.end();
+  WiFi.setAutoReconnect(true);
+  if (ssid.length()) WiFi.begin(ssid.c_str(), pass.c_str());   // resume the stored join
+}
+
 void webStatus() {
   Serial.print("  WiFi AP "); Serial.print(AP_SSID); Serial.print(" @ "); Serial.print(WiFi.softAPIP());
   Serial.print(", "); Serial.print(WiFi.softAPgetStationNum()); Serial.print(" joined; STA ");

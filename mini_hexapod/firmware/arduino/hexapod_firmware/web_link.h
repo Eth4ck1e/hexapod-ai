@@ -17,3 +17,4 @@ bool webConnected();
 bool webWantsNeural();
 void webSetWifi(const char* ssid, const char* pass);
 void webStatus();
+void webScan();

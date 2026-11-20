@@ -123,6 +123,7 @@ static void ncHandle(char* line, float t) {
   if (!strncasecmp(line, "wifi", 4) && (line[4] == 0 || line[4] == ' ')) {
     char* rest = line + 4; while (*rest == ' ') ++rest;
     if (*rest == 0) { webStatus(); return; }
+    if (!strcasecmp(rest, "scan")) { webScan(); return; }
     char* sp = strrchr(rest, ' ');
     if (!sp) { Serial.println("  ? wifi SSID PASSWORD"); return; }
     *sp = 0; char* pass = sp + 1; while (*pass == ' ') ++pass;
