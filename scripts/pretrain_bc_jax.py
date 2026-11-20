@@ -96,21 +96,80 @@ def _collect_demos(env: HexapodBraxEnv, n_envs: int, n_steps: int, rng):
 
     @jax.jit
     def step_collect(state, _):
+        # Scaffold-driven env (gait_scale=1): the obs BEFORE the step is what the
+        # policy would see, bc_target is the scaffold's action for that step.
         nstate = jax.vmap(env.step)(state, zero_actions)
         # `bc_target` is exposed in metrics. The auto-reset wrapper at this
         # level might mask it; we read from pipeline_state.metrics directly.
         bc = nstate.pipeline_state.metrics["bc_target"]      # (n_envs, 18)
-        return nstate, (nstate.obs, bc)
+        return nstate, (state.obs, bc, nstate.reward, nstate.done)
 
     t0 = time.perf_counter()
-    state, (obs_seq, bc_seq) = jax.lax.scan(
+    state, (obs_seq, bc_seq, rew_seq, done_seq) = jax.lax.scan(
         step_collect, state, jnp.arange(n_steps))
     obs_seq.block_until_ready()
     print(f"  collected in {time.perf_counter() - t0:.1f}s")
 
     obs_all = obs_seq.reshape(-1, obs_seq.shape[-1])
     bc_all  = bc_seq.reshape(-1, bc_seq.shape[-1])
-    return obs_all, bc_all
+    return obs_all, bc_all, rew_seq, done_seq
+
+
+def _discounted_returns(rew_seq, done_seq, gamma: float, drop_tail: int):
+    """Monte-Carlo returns G_t = r_t + γ(1-done_t)G_{t+1} per env over the rollout
+    (rew_seq, done_seq: (n_steps, n_envs)). The rollout is truncated, so the last
+    `drop_tail` steps (where the missing bootstrap bites, γ^drop_tail ≈ 0) are
+    marked invalid. Returns (returns, valid_mask) flattened like obs_all."""
+    def back(g_next, x):
+        r, d = x
+        g = r + gamma * (1.0 - d) * g_next
+        return g, g
+    _, G = jax.lax.scan(back, jnp.zeros_like(rew_seq[0]), (rew_seq[::-1], done_seq[::-1]))
+    G = G[::-1]
+    valid = jnp.ones_like(rew_seq, dtype=bool).at[-drop_tail:].set(False)
+    return G.reshape(-1), valid.reshape(-1)
+
+
+def _train_value(networks, normalizer_params, obs_all, returns, valid, n_epochs, batch_size, lr, rng):
+    """Fit the critic to the scaffold rollouts' returns so PPO does not start
+    from a random value function. BC trains the actor only; with a random critic
+    the first PPO updates follow noise advantages — harmless for a 12 mm foot
+    residual, fatal for a joint-target policy (p1/p2, 2026-11-19)."""
+    obs = obs_all[valid]
+    tgt = returns[valid]
+    print(f"  critic pretrain on {obs.shape[0]:,d} samples; return mean {float(tgt.mean()):.1f} "
+          f"std {float(tgt.std()):.1f}")
+    rng, init_rng = jax.random.split(rng)
+    value_params = networks.value_network.init(init_rng)
+    optimizer = optax.adam(lr)
+    opt_state = optimizer.init(value_params)
+
+    def loss_fn(params, o, g):
+        v = networks.value_network.apply(normalizer_params, params, o)
+        return jnp.mean((v - g) ** 2)
+
+    @jax.jit
+    def update(params, opt_state, o, g):
+        loss, grads = jax.value_and_grad(loss_fn)(params, o, g)
+        updates, opt_state = optimizer.update(grads, opt_state, params)
+        return optax.apply_updates(params, updates), opt_state, loss
+
+    n = obs.shape[0]
+    n_batches = n // batch_size
+    for epoch in range(n_epochs):
+        rng, perm_rng = jax.random.split(rng)
+        perm = jax.random.permutation(perm_rng, n)
+        o_s, g_s = obs[perm], tgt[perm]
+        tot = 0.0
+        t0 = time.perf_counter()
+        for b in range(n_batches):
+            lo, hi = b * batch_size, (b + 1) * batch_size
+            value_params, opt_state, loss = update(value_params, opt_state, o_s[lo:hi], g_s[lo:hi])
+            tot += float(loss)
+        print(f"  value epoch {epoch+1:>2}/{n_epochs}  mse={tot / n_batches:.3f}  "
+              f"(rmse {math.sqrt(tot / n_batches):.2f} vs return std {float(tgt.std()):.1f})  "
+              f"({time.perf_counter() - t0:.1f}s)")
+    return value_params
 
 
 # ============================================================================
@@ -228,6 +287,10 @@ def _train_bc(networks, obs_all, bc_all, n_epochs, batch_size, lr, rng, log_std:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--n-envs",     type=int, default=N_ENVS_DEMO)
+    parser.add_argument("--value-epochs", type=int, default=3,
+                        help="epochs of critic pretraining on the demo rollouts' discounted returns "
+                             "(0 = leave the critic at random init, the pre-2026-11-19 behaviour)")
+    parser.add_argument("--gamma", type=float, default=0.97, help="discount for the critic targets (PPO uses 0.97)")
     parser.add_argument("--log-std",    type=float, default=LOG_STD_INIT,
                         help="exploration log-std baked into the saved policy (PPO starts from it). "
                              f"Default {LOG_STD_INIT} (~1° per joint). Joint-target policies (ACTION_SPACE "
@@ -280,8 +343,9 @@ def main() -> None:
     rng, demo_rng = jax.random.split(rng)
 
     print("\n2. collecting demos...")
-    obs_all, bc_all = _collect_demos(env, args.n_envs, args.n_steps, demo_rng)
-    print(f"   shapes: obs={obs_all.shape}, bc={bc_all.shape}")
+    obs_all, bc_all, rew_seq, done_seq = _collect_demos(env, args.n_envs, args.n_steps, demo_rng)
+    print(f"   shapes: obs={obs_all.shape}, bc={bc_all.shape}  "
+          f"reward/step {float(rew_seq.mean()):.3f}  done rate {float(done_seq.mean()):.4f}")
 
     print("\n3. building networks + training BC...")
     # Use Brax's running_statistics.normalize to match train_jax.py's
@@ -292,6 +356,14 @@ def main() -> None:
     norm_p, pol_p, val_p = _train_bc(
         networks, obs_all, bc_all, args.n_epochs, args.batch_size,
         LEARNING_RATE, train_rng, log_std=args.log_std)
+
+    if args.value_epochs > 0:
+        print("\n3b. pretraining the critic on the demos' discounted returns...")
+        drop_tail = int(math.ceil(math.log(0.01) / math.log(args.gamma)))   # γ^k < 1 %
+        returns, valid = _discounted_returns(rew_seq, done_seq, args.gamma, drop_tail)
+        rng, val_rng = jax.random.split(rng)
+        val_p = _train_value(networks, norm_p, obs_all, returns, valid,
+                             args.value_epochs, args.batch_size, LEARNING_RATE, val_rng)
 
     print("\n4. saving (normalizer, policy, value) tuple...")
     out_dir = Path(args.out_dir)

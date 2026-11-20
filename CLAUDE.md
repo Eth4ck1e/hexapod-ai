@@ -523,6 +523,18 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   fine on the S3 FPU, ~50k MACs/step), a phase clock and the cmd — no gait port.
   `drive_serial.py --action-space joint` (default from the session) tests it tethered
   first. The residual v2h policy + scaffold port remains the fallback.
+  **Lessons from the first two runs (p1, p2, 2026-11-19 evening)**: the BC checkpoint
+  reproduces the scaffold in sim, but PPO collapsed it within the first ~6M steps
+  (+818…+1216 vs scaffold +2200; p2 with log_std −6 / lr 1e-4 was WORSE: +210).
+  Not noise, not DR, not the Brax wrappers (all checked on the Mac). Two real causes:
+  (1) `pretrain_bc_jax` trained the actor only, so PPO started from a RANDOM critic and
+  its first thousands of updates followed noise advantages — harmless for a 12 mm foot
+  residual, fatal for absolute joint targets → BC now also pretrains the critic on the
+  demo rollouts' discounted returns (`--value-epochs`, default 3). (2) BC paired the
+  post-step obs with the step's label (off by one; irrelevant for ≈0 residual labels,
+  but a joint-target policy could read its label from `joint_pos`) → now pre-step obs.
+  Also `--clipping-epsilon` (CLIP_EPS). A near-deterministic actor (log_std −6) makes
+  PPO ratios explode — keep log_std −4 and lower the LR instead.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,

@@ -421,6 +421,8 @@ def main():
                    help=f"PPO Adam learning rate (default {LEARNING_RATE}; joint-target policies: try 1e-4)")
     p.add_argument("--entropy-cost", type=float, default=ENTROPY_COST,
                    help=f"PPO entropy bonus (default {ENTROPY_COST})")
+    p.add_argument("--clipping-epsilon", type=float, default=0.3,
+                   help="PPO likelihood-ratio clip (Brax default 0.3; joint-target policies: 0.2)")
     p.add_argument("--run", type=str, default=RUN_BASE)
     p.add_argument("--restore-discriminator", type=str, default=None,
                    help="optional path to a previously-saved discriminator.pkl. "
@@ -649,6 +651,7 @@ def main():
             episode_length     = EPISODE_LENGTH,
             learning_rate      = args.learning_rate,
             entropy_cost       = args.entropy_cost,
+            clipping_epsilon   = args.clipping_epsilon,
             discounting        = DISCOUNT,
             unroll_length      = UNROLL_LENGTH,
             network_factory    = _custom_network_factory,

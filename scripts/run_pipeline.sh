@@ -20,6 +20,8 @@
 #   LOG_STD         exploration log-std baked by BC (default -4.0; joint-target policies: -6)
 #   LEARNING_RATE   PPO learning rate (default 3e-4; joint-target policies: 1e-4)
 #   ENTROPY_COST    PPO entropy bonus (default 1e-3)
+#   CLIP_EPS        PPO ratio clip (default 0.3; joint-target policies: 0.2)
+#   VALUE_EPOCHS    BC critic-pretraining epochs (default 3; 0 = random critic as before)
 #   ACTION_SPACE    foot | joint (default: the chain_train session's)
 #   PRIORS          override priors npz (default checkpoints/amp_priors_<robot>_<TAG>.npz)
 #   BC_DIR          override BC checkpoint dir (default checkpoints/bc_pretrained_jax_<robot>_<TAG>)
@@ -127,7 +129,7 @@ if want bc; then
     log "STAGE 2/3  BC pretrain → $BC_DIR"
     run_stage "logs/stdout/bc_${ROBOT}_${TAG}.log" \
         "$PY" -u scripts/pretrain_bc_jax.py --cmd-mask paper_stance --action-space "$ACTION_SPACE" \
-        ${LOG_STD:+--log-std "$LOG_STD"} --out-dir "$BC_DIR"
+        ${LOG_STD:+--log-std "$LOG_STD"} ${VALUE_EPOCHS:+--value-epochs "$VALUE_EPOCHS"} --out-dir "$BC_DIR"
   fi
 fi
 
@@ -139,6 +141,7 @@ if want amp; then
     amp_common=(--priors "$PRIORS" --cmd-mask paper_stance --action-space "$ACTION_SPACE"
                 --style-weight "$STYLE_WEIGHT" --steps-per-segment "$AMP_STEPS"
                 ${LEARNING_RATE:+--learning-rate "$LEARNING_RATE"} ${ENTROPY_COST:+--entropy-cost "$ENTROPY_COST"}
+                ${CLIP_EPS:+--clipping-epsilon "$CLIP_EPS"}
                 --partition-disc --dr-scale "$DR_SCALE" --run "$RUN")
     if [[ "$SEGMENT_ISOLATION" == "1" ]]; then
       # One process per segment. Resume-aware: segments whose params.pkl exist
