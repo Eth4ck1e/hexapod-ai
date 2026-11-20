@@ -43,6 +43,11 @@ void webBegin() {
 
 void webSetWifi(const char* ssid, const char* pass) {
   Preferences wp; wp.begin("wifi", false); wp.putString("ssid", ssid); wp.putString("pass", pass); wp.end();
+  // A join already in progress rejects new credentials ("sta is connecting, cannot set
+  // config"): restart the STA interface first.
+  WiFi.setAutoReconnect(false); WiFi.disconnect(false, true);
+  WiFi.mode(WIFI_AP); delay(300); WiFi.mode(WIFI_AP_STA); delay(300);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, pass);
   Serial.print("WiFi: joining '"); Serial.print(ssid); Serial.println("' (saved; 'wifi' alone shows the address once connected)");
 }
