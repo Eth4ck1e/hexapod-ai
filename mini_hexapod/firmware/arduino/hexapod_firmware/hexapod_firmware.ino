@@ -499,6 +499,7 @@ void i2cScan() {
     if (!digitalRead(SDA)) Serial.println("  SDA still LOW: hardware holds it (wiring/short/damaged slave). Scan below is meaningless.");
   }
   Wire.begin();
+  Wire.setClock(400000);
   Serial.print("I2C scan (SDA="); Serial.print(SDA); Serial.print(" SCL="); Serial.print(SCL); Serial.println("):");
   uint8_t n = 0;
   for (uint8_t a = 0x08; a < 0x78; ++a) {
@@ -1601,6 +1602,7 @@ void setup() {
   Serial.println("==========================================");
 
   Wire.begin();
+  Wire.setClock(400000);          // PCA9685 fast mode: 18 servo writes take ~3 ms instead of ~12 ms per 20 ms tick
   initDriver(pwm_right);
   initDriver(pwm_left);
   delay(200);
