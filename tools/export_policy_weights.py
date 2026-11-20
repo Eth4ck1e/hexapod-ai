@@ -83,16 +83,16 @@ def main() -> None:
     ap.add_argument("--note", default="", help="free-text provenance note")
     args = ap.parse_args()
 
-    import jax
-    import jax.numpy as jnp
     import chain_train
+    import jax.numpy as jnp
+    import mujoco
     from brax.training.acme import running_statistics
     from brax.training.agents.ppo.networks import make_ppo_networks
+    from pretrain_bc_jax import POLICY_HIDDEN_LAYERS
+
+    from envs.hexapod_env_jax import EnvParams
     from envs.obs_layout import OBS_SLOT_DIMS, active_variant, obs_dim, obs_slots
     from gait.controller import Controller
-    from envs.hexapod_env_jax import EnvParams
-    from pretrain_bc_jax import POLICY_HIDDEN_LAYERS
-    import mujoco
 
     model_path = args.model or chain_train.MODEL_PATH
     ctrl = Controller(str(_ROOT / model_path) if not Path(model_path).is_absolute() else model_path)
