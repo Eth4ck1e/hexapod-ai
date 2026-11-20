@@ -579,6 +579,25 @@ it to v27-equivalent (BC → AMP) and deploy a real policy on it.
   0 % falls, r_lin 0.998/0.997, femur swing 26.4° vs scaffold 28.2°, `media/plots/pure_p7_eval.csv`).
   **Ship p7**: `checkpoints/bc_pretrained_jax_mini_hexapod_pure_p7/params.pkl`; package rebuilt.
   Step height is NOT a runtime command (cmd has no lift slot): changing it = profile edit + re-clone.
+- **ON-BOARD CONTROLLER — DONE 2026-11-20 (firmware v0.5, the user's end state)**: menu `N` runs the
+  cloned policy ON the S3 at 50 Hz (`neural_mode.ino`; portable C core `neural_core.h` = MLP +
+  standing-pose IK incl. tilt, verified vs the Python reference by `tools/check_neural_core.py`
+  to 6e-7 rad; weights = `policy_weights.h` from `tools/export_policy_weights.py`, now with
+  stance/envelope/tilt constants). Command paths: **WiFi web controller** (`wifi_web.ino` AP
+  `hexapod`/`hexapod123` → http://192.168.4.1/, `web_page.h`: two sticks + hold buttons +
+  telemetry over a hand-rolled WebSocket; `wifi "SSID" PASS` also joins a network, `wifi scan`),
+  **Dabble BLE gamepad** (`ble_dabble.ino`, NUS service; app sends ONE control at a time → spin
+  buttons keep the last stick vector), **text lines** (USB / BLE serial). A phone input in the
+  main menu auto-enters `N`. **Tilt**: p8 = BC with `CMD_MASK=paper_tilt` (pitch ±10°, roll ±15°;
+  = scaffold without tilt, 3 % falls under full tilt cmds — a cmd-space corner, 18 epochs (p9)
+  didn't help → the web stick spans 60 % of the range). **Timing lessons**: weights in flash
+  behind the S3's small cache → iterate dense layers ROW-wise (column walk = 46 ms/eval, rows =
+  8 ms; 0 late ticks at 50 Hz); `WiFi.setSleep(false)`; one write per WS frame + TCP_NODELAY.
+  Phone hotspots on IPv6-only carriers give the Mac a CLAT 192.0.0.2 → reach the bot via its
+  global IPv6 (`WiFi.enableIPv6()`); client-to-client RTT through an iPhone hotspot ≈ 90 ms
+  (the bot's own AP is the demo path). `tools/web_controller_test.py` = scripted combined-input
+  test with telemetry + serial log mirror. Package (`tools/package_submission.py`) ships the whole
+  sketch; the scrubbed copy compiles.
 - **Still PhantomX-flavoured**: `FULL_PITCH_DEV`/`FULL_ROLL_DEV` (15°) and
   pitch/roll sample ranges in `make_env_params`; `tools/calibrate_scaffold_speed.py`
   has not been run for the mini (`speed_levels={}` → single default speed,

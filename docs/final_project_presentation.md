@@ -84,6 +84,10 @@ On stage, in this order (each step is a fallback for the next):
    errors); the user judged it indistinguishable from the programmed gait. Foot lift was then
    raised 15 → 21 → 30 mm (`lift_scale` 2.0: the 9 g servos lag the commanded arc, so 21 mm
    still dragged) and the policy re-cloned as p7 (= scaffold, 0 % falls).
+3b. **On-board (no laptop) — the real demo (firmware v0.5)**: power the bot, join WiFi `hexapod` /
+   `hexapod123` on the phone, open http://192.168.4.1/ (or let the sign-in sheet pop up). Walk
+   stick + spin buttons + raise/lower + tilt stick, all combinable; STAND / REST buttons. The
+   first input enters the controller automatically. Dabble (BLE) is the fallback controller.
 4. If anything misbehaves: unplug USB → watchdog homes the legs within 0.5 s;
    switch to the videos.
 5. **Between demos type `rest`** (or run with `--auto-rest 10`): the bot squats and
